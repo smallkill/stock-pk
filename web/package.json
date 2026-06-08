@@ -1,0 +1,12 @@
+{
+  "name": "@stock-pk/web",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "test": "vitest run"
+  },
+  "dependencies": { "astro": "^5.0.0" },
+  "devDependencies": { "vitest": "~3.2.0" }
+}
