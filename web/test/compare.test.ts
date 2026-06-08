@@ -54,3 +54,24 @@ describe("computeCompare 不重疊保護", () => {
     expect(r.stocks).toEqual([]);
   });
 });
+
+import { normalizeSplits } from "../src/lib/compare";
+describe("normalizeSplits 拆股修正", () => {
+  it("7:1 拆股假斷層被弭平、相鄰比值正常、保留真實報酬", () => {
+    const out = normalizeSplits([700, 720, 100, 105]); // 720→100 為拆股
+    for (let i = 1; i < out.length; i++) {
+      const r = out[i] / out[i - 1];
+      expect(r).toBeGreaterThan(0.85);
+      expect(r).toBeLessThan(1.18);
+    }
+    // 真實總報酬 = (720/700)*(105/100),不含拆股假跌
+    expect(out[out.length - 1] / out[0]).toBeCloseTo((720 / 700) * (105 / 100), 3);
+  });
+  it("無拆股序列比例不變", () => {
+    const out = normalizeSplits([100, 110, 105]);
+    expect(out[2] / out[0]).toBeCloseTo(105 / 100);
+  });
+  it("短序列原樣回傳", () => {
+    expect(normalizeSplits([50])).toEqual([50]);
+  });
+});

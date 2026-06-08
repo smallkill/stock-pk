@@ -97,7 +97,7 @@ import { PRESETS } from "../lib/dates";
 
 <script>
   import { presetRange, clampEnd, validRange, toYmd } from "../lib/dates";
-  import { computeCompare, type SeriesInput, type CompareResult } from "../lib/compare";
+  import { computeCompare, normalizeSplits, type SeriesInput, type CompareResult } from "../lib/compare";
   import { COLORS, renderChartSvg, type ChartLine } from "../lib/chart";
   import { fetchCompare } from "../lib/api";
   import { initSlots, getSelectedTickers, getSelectedNames } from "../lib/slots-ui";
@@ -486,6 +486,8 @@ import { PRESETS } from "../lib/dates";
 
     try {
       const series = await fetchCompare(tickers, fromSec, toSec);
+      // 修正 Yahoo 漏調的拆股(如 0052 2025-11 約 7:1),避免跨拆股點報酬全錯。
+      for (const s of series) s.adj = normalizeSplits(s.adj);
       // 用使用者選的中文名覆蓋 Yahoo 英文名(找不到才保留 Yahoo 名)。
       const zhNames = getSelectedNames();
       for (const s of series) s.name = zhNames[s.ticker] ?? s.name;

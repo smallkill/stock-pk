@@ -4,6 +4,28 @@ export interface SeriesInput {
   days: number[]; // 交易日 unix 秒,遞增
   adj: number[];  // 對應 adjclose(已濾 null)
 }
+
+/**
+ * 修正 Yahoo 漏調的拆股。台股單日漲跌幅限 ±10%,故相鄰交易日 adjclose 比值
+ * 落在 (0.85, 1.18) 之外必為拆股/反分割(不可能是真實價格變動,例如 0052
+ * 2025-11 約 7:1 拆股,Yahoo 的 adjclose 沒調整→242→34 假斷層)。
+ * 偵測到斷層就把「斷層之前」的值乘以該比值,使序列連續(只保留比例;絕對值無意義,
+ * 本工具只用比率算報酬)。回新陣列,不改原輸入。
+ */
+export function normalizeSplits(adj: number[]): number[] {
+  const n = adj.length;
+  if (n < 2) return adj.slice();
+  const out = new Array<number>(n);
+  let cum = 1; // i 之後所有拆股比值的乘積
+  for (let i = n - 1; i >= 0; i--) {
+    out[i] = adj[i] * cum;
+    if (i >= 1 && adj[i - 1] > 0) {
+      const r = adj[i] / adj[i - 1];
+      if (r < 0.85 || r > 1.18) cum *= r; // i-1 及更早需乘以此比值才與 i 之後同尺度
+    }
+  }
+  return out;
+}
 export interface StockResult {
   ticker: string;
   name: string;
