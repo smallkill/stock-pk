@@ -20,6 +20,16 @@ export function getSelectedTickers(): string[] {
   return out;
 }
 
+/** 取已選股票的 ticker → 中文名(來自 stocks.json,優於 Yahoo 英文名)。 */
+export function getSelectedNames(): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (!slotsEl) return map;
+  slotsEl.querySelectorAll<HTMLInputElement>("input.stk").forEach((inp) => {
+    if (inp.dataset.ticker && inp.dataset.name) map[inp.dataset.ticker] = inp.dataset.name;
+  });
+  return map;
+}
+
 /** 目前槽位數。 */
 function slotCount(): number {
   return slotsEl ? slotsEl.querySelectorAll(".slot").length : 0;
@@ -73,6 +83,7 @@ function makeSlot(prefill?: string): HTMLElement {
   // input 事件 → 重設 ticker(因為內容變了就不再是「已選」)+ 顯示候選
   input.addEventListener("input", () => {
     input.dataset.ticker = "";
+    input.dataset.name = "";
     renderCands(input, cands);
   });
   input.addEventListener("focus", () => renderCands(input, cands));
@@ -86,6 +97,7 @@ function makeSlot(prefill?: string): HTMLElement {
     if (s) {
       input.value = `${s.code} ${s.name}`;
       input.dataset.ticker = tickerOf(s);
+      input.dataset.name = s.name;
     } else {
       input.value = prefill;
     }
@@ -115,6 +127,7 @@ function renderCands(input: HTMLInputElement, cands: HTMLUListElement): void {
       e.preventDefault();
       input.value = `${s.code} ${s.name}`;
       input.dataset.ticker = tickerOf(s);
+      input.dataset.name = s.name;
       cands.hidden = true;
     });
     cands.appendChild(li);

@@ -7,7 +7,8 @@
   <button id="add" type="button" class="add">＋ 新增比較股票</button>
 </div>
 
-<style>
+<!-- 槽位由 slots-ui 的 JS 動態建立,scoped 樣式吃不到(input/button 又不繼承 font-family→中文 tofu),故 is:global -->
+<style is:global>
   .slots-block{display:flex;flex-direction:column;gap:.6rem}
   .slots{display:flex;flex-direction:column;gap:.6rem}
   .slot{display:flex;gap:.5rem;align-items:flex-start}

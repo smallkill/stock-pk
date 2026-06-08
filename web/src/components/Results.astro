@@ -7,7 +7,8 @@
   <p id="note" class="note"></p>
 </section>
 
-<style>
+<!-- 卡片/圖/圖例皆由 index 的 JS 動態建立,scoped 樣式吃不到,故 is:global(選擇器以 .card/.cards/.chart/.legend/#results 限定避免外洩) -->
+<style is:global>
   #results{margin-top:1.8rem}
   .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.9rem}
   .card{

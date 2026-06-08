@@ -100,7 +100,7 @@ import { PRESETS } from "../lib/dates";
   import { computeCompare, type SeriesInput, type CompareResult } from "../lib/compare";
   import { COLORS, lineChartSvg, type ChartLine } from "../lib/chart";
   import { fetchCompare } from "../lib/api";
-  import { initSlots, getSelectedTickers } from "../lib/slots-ui";
+  import { initSlots, getSelectedTickers, getSelectedNames } from "../lib/slots-ui";
 
   // ----- 元素 -----
   const fromEl = document.getElementById("from") as HTMLInputElement;
@@ -332,6 +332,9 @@ import { PRESETS } from "../lib/dates";
 
     try {
       const series = await fetchCompare(tickers, fromSec, toSec);
+      // 用使用者選的中文名覆蓋 Yahoo 英文名(找不到才保留 Yahoo 名)。
+      const zhNames = getSelectedNames();
+      for (const s of series) s.name = zhNames[s.ticker] ?? s.name;
       lastSeries = series;
       lastAmount = amount;
       // 基準預設 0050(若在清單)否則第一檔
