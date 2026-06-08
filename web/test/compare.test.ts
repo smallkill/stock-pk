@@ -16,6 +16,7 @@ describe("computeCompare", () => {
     const b = r.stocks.find((s) => s.ticker === "0050.TW")!;
     expect(b.roi).toBeCloseTo(0.2);          // 50→60 = +20%
     expect(b.final).toBeCloseTo(120000);
+    expect(r.days).toEqual([10, 20, 30]);    // 共同區間交易日(取第一檔)
   });
   it("vs 基準差額($與%),基準為 0050", () => {
     const r = computeCompare([A, B], 100000, "0050.TW");
