@@ -29,3 +29,11 @@ describe("tickerOf", () => {
     expect(tickerOf({ code: "6488", name: "環球晶", suffix: "TWO" })).toBe("6488.TWO");
   });
 });
+
+describe("filterStocks 大小寫不敏感(主動式 ETF 代號帶大寫 A)", () => {
+  it("打小寫 00981a 也能搜到 00981A", () => {
+    const list = [{ code: "00981A", name: "主動統一台股增長", suffix: "TW" as const }];
+    expect(filterStocks(list, "00981a").map((s) => s.code)).toEqual(["00981A"]);
+    expect(filterStocks(list, "00981A").map((s) => s.code)).toEqual(["00981A"]);
+  });
+});
