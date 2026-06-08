@@ -5,6 +5,6 @@ compatibility_date = "2025-09-06"
 [[d1_databases]]
 binding = "DB"
 database_name = "stockpk"
-database_id = "PLACEHOLDER_FILL_AFTER_d1_create"
+database_id = "28c3bf82-2587-47a7-8d46-1dee03c6eeb7"
 
 # secret: wrangler secret put VISIT_SALT
