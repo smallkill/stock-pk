@@ -12,5 +12,11 @@ database_id = "28c3bf82-2587-47a7-8d46-1dee03c6eeb7"
 binding = "DEVBOX"
 service = "devbox-api"
 
+# 速率煞車(per-colo 寬鬆過濾):compare/share 各以 per-IP key 限 20/分。
+[[ratelimits]]
+name = "RL"
+namespace_id = "2001"
+simple = { limit = 20, period = 60 }
+
 # secret: wrangler secret put VISIT_SALT
 # secret: wrangler secret put CREATE_TOKEN(devbox 建短網址的 bearer)
