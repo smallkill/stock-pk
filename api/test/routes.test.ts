@@ -36,6 +36,15 @@ describe("GET /api/share", () => {
     const r = await SELF.fetch("https://x/api/share");
     expect(r.status).toBe(400);
   });
+  it("釣魚繞過 shape 被擋(尾斜線保護):dev.evil.com / dev@evil.com → 400", async () => {
+    for (const u of [
+      "https://derek-stock-pk.pages.dev.evil.com/phish",
+      "https://derek-stock-pk.pages.dev@evil.com/",
+    ]) {
+      const r = await SELF.fetch("https://x/api/share?u=" + encodeURIComponent(u));
+      expect(r.status).toBe(400);
+    }
+  });
   it("合法 stock-pk 網址但測試環境無 CREATE_TOKEN → 503", async () => {
     const r = await SELF.fetch("https://x/api/share?u=" + encodeURIComponent("https://derek-stock-pk.pages.dev/?t=2330.TW"));
     expect(r.status).toBe(503);
