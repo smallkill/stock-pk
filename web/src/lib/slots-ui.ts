@@ -136,11 +136,17 @@ function renderCands(input: HTMLInputElement, cands: HTMLUListElement): void {
 }
 
 /**
- * 初始化槽位區。讀 /stocks.json、建初始兩槽(第二槽預設 0050)、綁定新增鈕。
+ * 初始化槽位區。讀 /stocks.json、建初始槽位、綁定新增鈕。
  * @param slotsSelector 槽位容器
  * @param addSelector 新增鈕
+ * @param prefillCodes 預填代號陣列(如 ["2330","0050"]),用於網址分享帶入;
+ *        給定時建這些槽(限 2~5),否則維持預設(第一槽空、第二槽 0050)。
  */
-export async function initSlots(slotsSelector: string, addSelector: string): Promise<void> {
+export async function initSlots(
+  slotsSelector: string,
+  addSelector: string,
+  prefillCodes?: string[],
+): Promise<void> {
   slotsEl = document.querySelector<HTMLElement>(slotsSelector);
   addBtn = document.querySelector<HTMLButtonElement>(addSelector);
   if (!slotsEl) return;
@@ -152,8 +158,16 @@ export async function initSlots(slotsSelector: string, addSelector: string): Pro
     stocks = [];
   }
 
-  // 初始兩槽:第一槽空、第二槽預設 0050
-  slotsEl.replaceChildren(makeSlot(), makeSlot("0050"));
+  if (prefillCodes && prefillCodes.length > 0) {
+    // 預填:每個代號一槽,限 MAX_SLOTS;不足 MIN_SLOTS 補空槽。
+    const codes = prefillCodes.slice(0, MAX_SLOTS);
+    const slots = codes.map((c) => makeSlot(c));
+    while (slots.length < MIN_SLOTS) slots.push(makeSlot());
+    slotsEl.replaceChildren(...slots);
+  } else {
+    // 初始兩槽:第一槽空、第二槽預設 0050
+    slotsEl.replaceChildren(makeSlot(), makeSlot("0050"));
+  }
 
   if (addBtn) {
     addBtn.addEventListener("click", () => {
