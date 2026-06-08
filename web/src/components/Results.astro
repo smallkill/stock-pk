@@ -1,0 +1,44 @@
+---
+// 結果空殼:卡片、成長圖、提示。由 index.astro 的 client script 動態填。
+---
+<section id="results" hidden>
+  <div id="cards" class="cards"></div>
+  <div id="chart" class="chart"></div>
+  <p id="note" class="note"></p>
+</section>
+
+<style>
+  #results{margin-top:1.8rem}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.9rem}
+  .card{
+    position:relative;border:1px solid var(--line);border-radius:14px;background:var(--bg-elev);
+    padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.5rem;
+  }
+  .card.win{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .card .swatch{position:absolute;top:1.05rem;right:1.05rem;width:.85rem;height:.85rem;border-radius:3px}
+  .card .crown{font-size:1.05rem}
+  .card .nm{font-weight:700;font-size:1rem;display:flex;align-items:center;gap:.4rem}
+  .card .tk{font-family:var(--mono);font-size:.74rem;color:var(--muted)}
+  .card .roi{font-size:1.5rem;font-weight:800;font-family:var(--mono);letter-spacing:-.5px}
+  .card .roi.up{color:var(--up)}.card .roi.down{color:var(--down)}
+  .card .ln{display:flex;justify-content:space-between;font-size:.82rem;color:var(--ink-soft)}
+  .card .ln .v{font-family:var(--mono)}
+  .card .ln .v.up{color:var(--up)}.card .ln .v.down{color:var(--down)}
+  .card .basebtn{
+    margin-top:.2rem;align-self:flex-start;font-size:.72rem;padding:.2rem .5rem;border-radius:6px;
+    border:1px solid var(--line);background:var(--bg);color:var(--muted);cursor:pointer;font-family:var(--sans);
+  }
+  .card .basebtn:hover{border-color:var(--accent);color:var(--accent)}
+  .card.isbase .basebtn{background:var(--accent);color:#fff;border-color:var(--accent);cursor:default}
+
+  .chart{margin-top:1.4rem}
+  .chart svg{width:100%;height:240px;display:block;border:1px solid var(--line);border-radius:14px;background:var(--bg-elev)}
+  .legend{display:flex;flex-wrap:wrap;gap:.9rem;margin-top:.7rem;font-size:.82rem;color:var(--ink-soft)}
+  .legend .lg{display:flex;align-items:center;gap:.4rem}
+  .legend .dot{width:.8rem;height:.8rem;border-radius:50%}
+  .legend .lg .mn{font-family:var(--mono);font-size:.74rem;color:var(--muted)}
+
+  .note{margin-top:1rem;font-size:.86rem;color:var(--muted)}
+  .note.err{color:var(--down)}
+  .note.warn{color:#b35309}
+</style>

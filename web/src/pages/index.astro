@@ -1,0 +1,357 @@
+---
+import Base from "../layouts/Base.astro";
+import StockSlots from "../components/StockSlots.astro";
+import Results from "../components/Results.astro";
+import { PRESETS } from "../lib/dates";
+---
+<Base>
+  <section class="hero">
+    <h1>台股多檔 <span class="pk">PK</span></h1>
+    <p class="lede">選 2~5 檔台股、區間與金額,算每檔「含息」總報酬、互比差額、標出贏家,並畫成長曲線。</p>
+  </section>
+
+  <section class="panel">
+    <div class="field-group">
+      <label class="lbl">比較標的</label>
+      <StockSlots />
+    </div>
+
+    <div class="field-group">
+      <label class="lbl">區間</label>
+      <div id="presets" class="presets">
+        {PRESETS.map((p) => (
+          <button type="button" class="preset" data-key={p.key}>{p.label}</button>
+        ))}
+      </div>
+      <div class="dates">
+        <label class="datefield">起<input type="date" id="from" /></label>
+        <label class="datefield">訖<input type="date" id="to" /></label>
+      </div>
+    </div>
+
+    <div class="field-group amount-row">
+      <div>
+        <label class="lbl" for="amount">投入金額(每檔)</label>
+        <div class="amount-input">
+          <span class="cur">NT$</span>
+          <input type="number" id="amount" value="100000" min="1" step="1000" />
+        </div>
+      </div>
+      <button id="run" type="button" class="run">計算 PK →</button>
+    </div>
+  </section>
+
+  <Results />
+</Base>
+
+<style>
+  .hero{margin:2.4rem 0 1.6rem}
+  .hero h1{font-size:2.1rem;font-weight:800;margin:0 0 .4rem;letter-spacing:-1px}
+  .hero h1 .pk{color:var(--accent)}
+  .lede{margin:0;color:var(--ink-soft);max-width:52ch}
+
+  .panel{
+    border:1px solid var(--line);border-radius:18px;background:var(--bg-elev);
+    padding:1.4rem;display:flex;flex-direction:column;gap:1.4rem;
+  }
+  .field-group{display:flex;flex-direction:column;gap:.55rem}
+  .lbl{font-size:.82rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+
+  .presets{display:flex;flex-wrap:wrap;gap:.45rem}
+  .preset{
+    padding:.4rem .8rem;border:1px solid var(--line);border-radius:999px;background:var(--bg);
+    color:var(--ink-soft);font-family:var(--sans);font-size:.85rem;cursor:pointer;
+  }
+  .preset:hover{border-color:var(--accent);color:var(--accent)}
+  .preset.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+  .dates{display:flex;gap:.8rem;flex-wrap:wrap}
+  .datefield{display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--muted)}
+  .datefield input{
+    padding:.5rem .6rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);
+    font-family:var(--mono);font-size:.85rem;color:var(--ink);
+  }
+  .datefield input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+  .amount-row{flex-direction:row;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:1rem}
+  .amount-input{display:flex;align-items:center;gap:.4rem;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:.1rem .7rem;width:fit-content}
+  .amount-input .cur{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+  .amount-input input{border:none;background:transparent;padding:.55rem .2rem;width:9rem;font-family:var(--mono);font-size:1rem;color:var(--ink)}
+  .amount-input input:focus{outline:none}
+  .amount-input:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+  .run{
+    padding:.75rem 1.4rem;border:none;border-radius:11px;background:var(--accent);color:#fff;
+    font-family:var(--sans);font-weight:700;font-size:1rem;cursor:pointer;
+  }
+  .run:hover{filter:brightness(1.05)}
+  .run:disabled{opacity:.6;cursor:progress}
+
+  @media (max-width:560px){
+    .hero h1{font-size:1.7rem}
+    .amount-row{flex-direction:column;align-items:stretch}
+    .amount-input input{width:100%}
+    .run{width:100%}
+  }
+</style>
+
+<script>
+  import { presetRange, clampEnd, validRange, toYmd } from "../lib/dates";
+  import { computeCompare, type SeriesInput, type CompareResult } from "../lib/compare";
+  import { COLORS, lineChartSvg, type ChartLine } from "../lib/chart";
+  import { fetchCompare } from "../lib/api";
+  import { initSlots, getSelectedTickers } from "../lib/slots-ui";
+
+  // ----- 元素 -----
+  const fromEl = document.getElementById("from") as HTMLInputElement;
+  const toEl = document.getElementById("to") as HTMLInputElement;
+  const amountEl = document.getElementById("amount") as HTMLInputElement;
+  const runEl = document.getElementById("run") as HTMLButtonElement;
+  const presetsEl = document.getElementById("presets")!;
+  const resultsEl = document.getElementById("results") as HTMLElement;
+  const cardsEl = document.getElementById("cards")!;
+  const chartEl = document.getElementById("chart")!;
+  const noteEl = document.getElementById("note")!;
+
+  // ----- 槽位 -----
+  initSlots("#slots", "#add");
+
+  // ----- 格式化工具 -----
+  const fmtMoney = (n: number): string =>
+    "NT$" + Math.round(n).toLocaleString("en-US");
+  const fmtPct = (n: number): string => {
+    const v = n * 100;
+    const s = (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+    return s;
+  };
+  const fmtSignedMoney = (n: number): string =>
+    (n >= 0 ? "+" : "−") + "NT$" + Math.round(Math.abs(n)).toLocaleString("en-US");
+
+  // ----- 區間快捷鈕 -----
+  function setActivePreset(key: string | null): void {
+    presetsEl.querySelectorAll<HTMLButtonElement>(".preset").forEach((b) => {
+      b.classList.toggle("active", b.dataset.key === key);
+    });
+  }
+  presetsEl.querySelectorAll<HTMLButtonElement>(".preset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.key!;
+      const { from, to } = presetRange(key, Date.now());
+      fromEl.value = toYmd(from);
+      toEl.value = toYmd(to);
+      setActivePreset(key);
+    });
+  });
+  // 自訂日期改動 → 取消快捷高亮
+  fromEl.addEventListener("input", () => setActivePreset(null));
+  toEl.addEventListener("input", () => setActivePreset(null));
+
+  // 預設帶入 1 年
+  (() => {
+    const { from, to } = presetRange("1y", Date.now());
+    fromEl.value = toYmd(from);
+    toEl.value = toYmd(to);
+    setActivePreset("1y");
+  })();
+
+  // ----- 狀態:最近一次的 series + 金額,供前端切換基準重算 -----
+  let lastSeries: SeriesInput[] | null = null;
+  let lastAmount = 0;
+  let baseTicker = "";
+
+  // ----- 提示訊息 -----
+  function showNote(msg: string, kind: "err" | "warn" | "" = ""): void {
+    noteEl.textContent = msg;
+    noteEl.className = "note" + (kind ? " " + kind : "");
+  }
+
+  // ----- 卡片名稱對應(ticker → 顯示名,從 series 取)-----
+  function nameFor(ticker: string): string {
+    const s = lastSeries?.find((x) => x.ticker === ticker);
+    return s?.name ?? ticker;
+  }
+
+  // ----- 渲染卡片 + 圖(用目前 baseTicker)-----
+  function render(result: CompareResult): void {
+    cardsEl.replaceChildren();
+    chartEl.replaceChildren();
+
+    if (!result.overlap || result.stocks.length === 0) {
+      showNote("所選股票在共同區間沒有重疊資料,請換股票或拉長區間。", "warn");
+      return;
+    }
+
+    // 卡片(順序固定:依 lastSeries 的順序,讓顏色與圖一致)
+    const order = result.stocks;
+    order.forEach((s, i) => {
+      const color = COLORS[i % COLORS.length];
+      const card = document.createElement("div");
+      card.className = "card";
+      if (s.ticker === result.winner) card.classList.add("win");
+      if (s.ticker === baseTicker) card.classList.add("isbase");
+
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.background = color;
+
+      const nm = document.createElement("div");
+      nm.className = "nm";
+      const nmText = document.createElement("span");
+      nmText.textContent = s.name;
+      nm.appendChild(nmText);
+      if (s.ticker === result.winner) {
+        const crown = document.createElement("span");
+        crown.className = "crown";
+        crown.textContent = "👑";
+        nm.appendChild(crown);
+      }
+
+      const tk = document.createElement("div");
+      tk.className = "tk";
+      tk.textContent = s.ticker;
+
+      const roi = document.createElement("div");
+      roi.className = "roi " + (s.roi >= 0 ? "up" : "down");
+      roi.textContent = fmtPct(s.roi);
+
+      const finalLn = document.createElement("div");
+      finalLn.className = "ln";
+      const finalK = document.createElement("span");
+      finalK.textContent = "期末";
+      const finalV = document.createElement("span");
+      finalV.className = "v";
+      finalV.textContent = fmtMoney(s.final);
+      finalLn.append(finalK, finalV);
+
+      const diffLn = document.createElement("div");
+      diffLn.className = "ln";
+      const diffK = document.createElement("span");
+      diffK.textContent = "vs 基準";
+      const diffV = document.createElement("span");
+      diffV.className = "v " + (s.diff >= 0 ? "up" : "down");
+      if (s.ticker === baseTicker) {
+        diffV.classList.remove("up", "down");
+        diffV.textContent = "基準";
+      } else {
+        diffV.textContent = `${fmtSignedMoney(s.diff)}(${fmtPct(s.diffPct)})`;
+      }
+      diffLn.append(diffK, diffV);
+
+      const baseBtn = document.createElement("button");
+      baseBtn.type = "button";
+      baseBtn.className = "basebtn";
+      baseBtn.textContent = s.ticker === baseTicker ? "✓ 目前基準" : "設為基準";
+      baseBtn.addEventListener("click", () => {
+        if (s.ticker === baseTicker || !lastSeries) return;
+        baseTicker = s.ticker;
+        render(computeCompare(lastSeries, lastAmount, baseTicker));
+      });
+
+      card.append(swatch, nm, tk, roi, finalLn, diffLn, baseBtn);
+      cardsEl.appendChild(card);
+    });
+
+    // 成長圖(SVG 自產字串,股名不進 SVG)
+    const lines: ChartLine[] = order.map((s, i) => ({
+      name: s.ticker,
+      growth: s.growth,
+      color: COLORS[i % COLORS.length],
+    }));
+    chartEl.innerHTML = lineChartSvg(lines, 800, 240);
+
+    // 圖例(textContent,安全)
+    const legend = document.createElement("div");
+    legend.className = "legend";
+    order.forEach((s, i) => {
+      const lg = document.createElement("div");
+      lg.className = "lg";
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.background = COLORS[i % COLORS.length];
+      const nm = document.createElement("span");
+      nm.textContent = s.name;
+      const mn = document.createElement("span");
+      mn.className = "mn";
+      mn.textContent = s.ticker;
+      lg.append(dot, nm, mn);
+      legend.appendChild(lg);
+    });
+    chartEl.appendChild(legend);
+
+    // 提示:區間調整
+    const span = `${toYmd(result.from * 1000)} ~ ${toYmd(result.to * 1000)}`;
+    if (result.adjusted) {
+      showNote(`資料以各檔共同重疊區間對齊計算:${span}。`, "warn");
+    } else {
+      showNote(`計算區間:${span}。`, "");
+    }
+  }
+
+  // ----- 計算流程 -----
+  async function run(): Promise<void> {
+    const tickers = getSelectedTickers();
+    if (tickers.length < 2) {
+      resultsEl.hidden = false;
+      cardsEl.replaceChildren();
+      chartEl.replaceChildren();
+      showNote("請至少選 2 檔股票(需從候選清單點選,不可只打字)。", "err");
+      return;
+    }
+
+    const fromMs = fromEl.value ? Date.parse(fromEl.value + "T00:00:00Z") : NaN;
+    const toMsRaw = toEl.value ? Date.parse(toEl.value + "T00:00:00Z") : NaN;
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMsRaw)) {
+      resultsEl.hidden = false;
+      showNote("請選擇起訖日期。", "err");
+      return;
+    }
+    const toMs = clampEnd(toMsRaw, Date.now());
+    const v = validRange(fromMs, toMs);
+    if (!v.ok) {
+      resultsEl.hidden = false;
+      showNote("起始日必須早於結束日。", "err");
+      return;
+    }
+
+    const amount = Number(amountEl.value);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      resultsEl.hidden = false;
+      showNote("請輸入大於 0 的金額。", "err");
+      return;
+    }
+
+    const fromSec = Math.floor(fromMs / 1000);
+    const toSec = Math.floor(toMs / 1000);
+
+    resultsEl.hidden = false;
+    runEl.disabled = true;
+    runEl.textContent = "計算中…";
+    showNote("讀取股價資料中…", "");
+    cardsEl.replaceChildren();
+    chartEl.replaceChildren();
+
+    try {
+      const series = await fetchCompare(tickers, fromSec, toSec);
+      lastSeries = series;
+      lastAmount = amount;
+      // 基準預設 0050(若在清單)否則第一檔
+      const fav = series.find((s) => s.ticker.startsWith("0050."));
+      baseTicker = fav ? fav.ticker : series[0]?.ticker ?? "";
+      render(computeCompare(series, amount, baseTicker));
+    } catch (e) {
+      const code = e instanceof Error ? e.message : "unknown";
+      const friendly =
+        code === "no_data"
+          ? "找不到其中一檔的股價資料,請確認標的或換個區間。"
+          : code === "bad_ticker" || code === "bad_request"
+            ? "輸入有誤,請重新選擇標的與區間。"
+            : "讀取失敗,請稍後再試(可能是網路或服務忙碌)。";
+      showNote(friendly, "err");
+    } finally {
+      runEl.disabled = false;
+      runEl.textContent = "計算 PK →";
+    }
+  }
+
+  runEl.addEventListener("click", run);
+</script>

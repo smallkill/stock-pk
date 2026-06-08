@@ -1,0 +1,42 @@
+---
+// 股票輸入槽位:2~5 槽,每槽 input + 候選清單 + 移除鈕,外加「+ 新增比較股票」。
+// 互動邏輯在 ../lib/slots-ui.ts(initSlots / getSelectedTickers),由 index.astro 一起載入。
+---
+<div class="slots-block">
+  <div id="slots" class="slots"></div>
+  <button id="add" type="button" class="add">＋ 新增比較股票</button>
+</div>
+
+<style>
+  .slots-block{display:flex;flex-direction:column;gap:.6rem}
+  .slots{display:flex;flex-direction:column;gap:.6rem}
+  .slot{display:flex;gap:.5rem;align-items:flex-start}
+  .field{position:relative;flex:1}
+  .field input.stk{
+    width:100%;padding:.6rem .75rem;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg-elev);font-family:var(--sans);font-size:.95rem;color:var(--ink);
+  }
+  .field input.stk:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .cands{
+    list-style:none;margin:.3rem 0 0;padding:.25rem;position:absolute;z-index:20;left:0;right:0;
+    background:var(--bg-elev);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 8px 24px rgba(24,24,27,.10);max-height:260px;overflow:auto;
+  }
+  .cands li{
+    display:flex;gap:.6rem;align-items:baseline;padding:.45rem .55rem;border-radius:7px;cursor:pointer;
+  }
+  .cands li:hover{background:var(--accent-soft)}
+  .c-code{font-family:var(--mono);font-size:.82rem;color:var(--accent);min-width:4.2rem}
+  .c-name{font-size:.9rem;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rm{
+    flex:none;width:2.4rem;height:2.4rem;border:1px solid var(--line);border-radius:10px;
+    background:var(--bg-elev);color:var(--muted);cursor:pointer;font-size:.85rem;line-height:1;
+  }
+  .rm:hover{border-color:var(--down);color:var(--down)}
+  .add{
+    align-self:flex-start;padding:.5rem .9rem;border:1px dashed var(--accent);border-radius:10px;
+    background:var(--accent-soft);color:var(--accent);font-family:var(--sans);font-weight:600;
+    font-size:.9rem;cursor:pointer;
+  }
+  .add:disabled{opacity:.45;cursor:not-allowed;border-style:solid}
+</style>
