@@ -101,6 +101,7 @@ import { PRESETS } from "../lib/dates";
   import { COLORS, renderChartSvg, type ChartLine } from "../lib/chart";
   import { fetchCompare } from "../lib/api";
   import { initSlots, getSelectedTickers, getSelectedNames } from "../lib/slots-ui";
+  import { encodeState, parseState, type ShareState } from "../lib/share";
 
   // ----- 元素 -----
   const fromEl = document.getElementById("from") as HTMLInputElement;
@@ -113,8 +114,7 @@ import { PRESETS } from "../lib/dates";
   const chartEl = document.getElementById("chart")!;
   const noteEl = document.getElementById("note")!;
 
-  // ----- 槽位 -----
-  initSlots("#slots", "#add");
+  // ----- 槽位:於 bootstrap()(檔末)依網址狀態初始化 -----
 
   // ----- 格式化工具 -----
   const fmtMoney = (n: number): string =>
@@ -146,18 +146,32 @@ import { PRESETS } from "../lib/dates";
   fromEl.addEventListener("input", () => setActivePreset(null));
   toEl.addEventListener("input", () => setActivePreset(null));
 
-  // 預設帶入 1 年
-  (() => {
+  // 預設帶入 1 年(bootstrap 在無分享狀態時呼叫)
+  function applyDefaultRange(): void {
     const { from, to } = presetRange("1y", Date.now());
     fromEl.value = toYmd(from);
     toEl.value = toYmd(to);
     setActivePreset("1y");
-  })();
+  }
 
   // ----- 狀態:最近一次的 series + 金額,供前端切換基準重算 -----
   let lastSeries: SeriesInput[] | null = null;
   let lastAmount = 0;
   let baseTicker = "";
+
+  // ----- 把目前比較狀態寫進網址(不重整)-----
+  // 用 lastSeries 的 ticker(實際算出的標的)+ 目前表單日期/金額 + baseTicker。
+  function syncUrl(): void {
+    if (!lastSeries || lastSeries.length === 0) return;
+    const state: ShareState = {
+      tickers: lastSeries.map((s) => s.ticker),
+      from: fromEl.value,
+      to: toEl.value,
+      amount: lastAmount,
+      base: baseTicker,
+    };
+    history.replaceState(null, "", "?" + encodeState(state));
+  }
 
   // ----- 提示訊息 -----
   function showNote(msg: string, kind: "err" | "warn" | "" = ""): void {
@@ -387,6 +401,11 @@ import { PRESETS } from "../lib/dates";
     });
     chartEl.appendChild(legend);
 
+    // 網址即時反映目前比較(含基準切換)
+    syncUrl();
+    // 分享按鈕(計算成功才顯示)
+    renderShareBtn();
+
     // 提示:區間調整
     const span = `${toYmd(result.from * 1000)} ~ ${toYmd(result.to * 1000)}`;
     if (result.adjusted) {
@@ -396,8 +415,34 @@ import { PRESETS } from "../lib/dates";
     }
   }
 
+  // ----- 複製分享連結按鈕(放在結果區 chart 之後)-----
+  const shareBtn = document.createElement("button");
+  shareBtn.type = "button";
+  shareBtn.id = "share";
+  shareBtn.className = "sharebtn";
+  shareBtn.textContent = "🔗 複製分享連結";
+  let shareResetTimer: number | undefined;
+  shareBtn.addEventListener("click", () => {
+    void navigator.clipboard?.writeText(location.href).then(
+      () => {
+        shareBtn.textContent = "已複製 ✓";
+        window.clearTimeout(shareResetTimer);
+        shareResetTimer = window.setTimeout(() => {
+          shareBtn.textContent = "🔗 複製分享連結";
+        }, 1500);
+      },
+      () => { /* clipboard 失敗:無聲,使用者可手動複製網址 */ },
+    );
+  });
+  function renderShareBtn(): void {
+    // 置於 chart 之後、note 之前;若已在 DOM 不重複插入。
+    if (shareBtn.parentElement) return;
+    chartEl.insertAdjacentElement("afterend", shareBtn);
+  }
+
   // ----- 計算流程 -----
-  async function run(): Promise<void> {
+  // preferredBase:網址分享帶入的基準 ticker(僅首次自動計算用);一般點計算傳 null。
+  async function runCompare(preferredBase: string | null = null): Promise<void> {
     const tickers = getSelectedTickers();
     if (tickers.length < 2) {
       resultsEl.hidden = false;
@@ -446,9 +491,12 @@ import { PRESETS } from "../lib/dates";
       for (const s of series) s.name = zhNames[s.ticker] ?? s.name;
       lastSeries = series;
       lastAmount = amount;
-      // 基準預設 0050(若在清單)否則第一檔
+      // 基準:優先用 preferredBase(網址帶入且仍在算出清單內),否則 0050,否則第一檔
+      const prefer = preferredBase && series.some((s) => s.ticker === preferredBase)
+        ? preferredBase
+        : null;
       const fav = series.find((s) => s.ticker.startsWith("0050."));
-      baseTicker = fav ? fav.ticker : series[0]?.ticker ?? "";
+      baseTicker = prefer ?? (fav ? fav.ticker : series[0]?.ticker ?? "");
       render(computeCompare(series, amount, baseTicker));
     } catch (e) {
       const code = e instanceof Error ? e.message : "unknown";
@@ -465,5 +513,30 @@ import { PRESETS } from "../lib/dates";
     }
   }
 
-  runEl.addEventListener("click", run);
+  runEl.addEventListener("click", () => { void runCompare(); });
+
+  // ----- 啟動:依網址狀態決定預填 + 自動計算 -----
+  async function bootstrap(): Promise<void> {
+    const st = parseState(new URLSearchParams(location.search));
+    if (st) {
+      // 槽位:把 ticker(2330.TW)去後綴轉成 code(2330)再傳入
+      await initSlots("#slots", "#add", st.tickers.map((t) => t.split(".")[0]));
+      // 日期:網址有就填,否則回退預設 1 年
+      if (st.from && st.to) {
+        fromEl.value = st.from;
+        toEl.value = st.to;
+        setActivePreset(null);
+      } else {
+        applyDefaultRange();
+      }
+      // 金額
+      amountEl.value = String(st.amount);
+      // 自動計算(基準用網址帶入的 b)
+      void runCompare(st.base);
+    } else {
+      await initSlots("#slots", "#add");
+      applyDefaultRange();
+    }
+  }
+  void bootstrap();
 </script>
