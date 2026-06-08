@@ -98,7 +98,7 @@ import { PRESETS } from "../lib/dates";
 <script>
   import { presetRange, clampEnd, validRange, toYmd } from "../lib/dates";
   import { computeCompare, type SeriesInput, type CompareResult } from "../lib/compare";
-  import { COLORS, lineChartSvg, type ChartLine } from "../lib/chart";
+  import { COLORS, renderChartSvg, type ChartLine } from "../lib/chart";
   import { fetchCompare } from "../lib/api";
   import { initSlots, getSelectedTickers, getSelectedNames } from "../lib/slots-ui";
 
@@ -171,9 +171,113 @@ import { PRESETS } from "../lib/dates";
     return s?.name ?? ticker;
   }
 
+  // ----- 日期格式(unix 秒 → YYYY/MM/DD,UTC)-----
+  const fmtDate = (sec: number): string => toYmd(sec * 1000).replace(/-/g, "/");
+
+  // ----- hover:垂直游標線 + tooltip(資料存於閉包,文字一律 textContent)-----
+  // render() 每次重畫(含切換基準)都會重設 chartEl.innerHTML;listener 綁在持久的
+  // chartEl 上不會被清掉,故先移除上次掛的,避免重複累積 + 參考到已被換掉的 cursor/tip。
+  let detachHover: (() => void) | null = null;
+
+  function attachHover(
+    container: HTMLElement,
+    lines: ChartLine[],
+    days: number[],
+    pointX: number[],
+    amount: number,
+  ): void {
+    detachHover?.();
+    detachHover = null;
+    if (pointX.length === 0) return;
+
+    const cursor = document.createElement("div");
+    cursor.className = "cursor";
+    cursor.hidden = true;
+    const tip = document.createElement("div");
+    tip.className = "tip";
+    tip.hidden = true;
+    container.append(cursor, tip);
+
+    const svgEl = container.querySelector("svg");
+    const targetH = svgEl ? svgEl.clientHeight || 240 : 240;
+
+    function nearestIndex(px: number): number {
+      let best = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < pointX.length; i++) {
+        const d = Math.abs(pointX[i] - px);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      return best;
+    }
+
+    const onMove = (ev: MouseEvent): void => {
+      const rect = container.getBoundingClientRect();
+      const px = ev.clientX - rect.left;
+      const idx = nearestIndex(px);
+      const cx = pointX[idx];
+
+      cursor.hidden = false;
+      cursor.style.left = cx + "px";
+      cursor.style.height = targetH + "px";
+
+      // tooltip 內容
+      tip.replaceChildren();
+      const dateLn = document.createElement("div");
+      dateLn.className = "tip-date";
+      dateLn.textContent = fmtDate(days[idx]);
+      tip.appendChild(dateLn);
+
+      for (const l of lines) {
+        const v = l.growth[idx];
+        if (v === undefined) continue;
+        const pct = amount === 0 ? 0 : (v / amount - 1) * 100;
+        const row = document.createElement("div");
+        row.className = "tip-row";
+        const dot = document.createElement("span");
+        dot.className = "dot";
+        dot.style.background = l.color;
+        const nm = document.createElement("span");
+        nm.className = "tip-nm";
+        nm.textContent = l.name;
+        const val = document.createElement("span");
+        val.className = "tip-val";
+        val.textContent = `${fmtMoney(v)}(${(pct >= 0 ? "+" : "") + pct.toFixed(1)}%)`;
+        row.append(dot, nm, val);
+        tip.appendChild(row);
+      }
+
+      tip.hidden = false;
+      // 定位:預設在游標右側,若超出右緣則翻到左側。
+      const tw = tip.offsetWidth;
+      let tipX = cx + 12;
+      if (tipX + tw > rect.width) tipX = cx - 12 - tw;
+      if (tipX < 0) tipX = 0;
+      tip.style.left = tipX + "px";
+      tip.style.top = "8px";
+    };
+
+    const onLeave = (): void => {
+      cursor.hidden = true;
+      tip.hidden = true;
+    };
+
+    container.addEventListener("mousemove", onMove);
+    container.addEventListener("mouseleave", onLeave);
+
+    detachHover = () => {
+      container.removeEventListener("mousemove", onMove);
+      container.removeEventListener("mouseleave", onLeave);
+      cursor.remove();
+      tip.remove();
+    };
+  }
+
   // ----- 渲染卡片 + 圖(用目前 baseTicker)-----
   function render(result: CompareResult): void {
     cardsEl.replaceChildren();
+    detachHover?.();        // 移除上次 hover listener(replaceChildren 只清 DOM 不清 listener)
+    detachHover = null;
     chartEl.replaceChildren();
 
     if (!result.overlap || result.stocks.length === 0) {
@@ -251,13 +355,18 @@ import { PRESETS } from "../lib/dates";
       cardsEl.appendChild(card);
     });
 
-    // 成長圖(SVG 自產字串,股名不進 SVG)
+    // 成長圖(SVG 自產字串,股名不進 SVG;以容器實際像素寬度畫,viewBox 1:1)
     const lines: ChartLine[] = order.map((s, i) => ({
-      name: s.ticker,
+      name: s.name,
       growth: s.growth,
       color: COLORS[i % COLORS.length],
     }));
-    chartEl.innerHTML = lineChartSvg(lines, 800, 240);
+    const w = chartEl.clientWidth || 700;
+    const { svg, pointX } = renderChartSvg(lines, result.days, lastAmount, w, 240);
+    chartEl.innerHTML = svg;
+
+    // hover 游標線 + tooltip(均由 DOM API 建立,文字走 textContent,XSS-safe)
+    attachHover(chartEl, lines, result.days, pointX, lastAmount);
 
     // 圖例(textContent,安全)
     const legend = document.createElement("div");
