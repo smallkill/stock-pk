@@ -1,10 +1,13 @@
 import { recordVisit, fetchVisitStats } from "./visits";
 import { fetchChart } from "./yahoo";
 
-export interface Env { DB: D1Database; VISIT_SALT?: string; }
+export interface Env { DB: D1Database; VISIT_SALT?: string; CREATE_TOKEN?: string; DEVBOX?: Fetcher; }
 
 const CORS = { "access-control-allow-origin": "*" };
 const MAX_TICKERS = 5;
+// 用 Derek 自己的 devbox 短網址服務縮分享連結;token 存 secret,不外露。
+const SHORTEN_API = "https://devbox-api.chinte-cheng.workers.dev/api/links";
+const SHARE_PREFIX = "https://derek-stock-pk.pages.dev/";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -55,6 +58,32 @@ export default {
         return Response.json({ error: "no_data" }, { status: 502, headers: CORS });
       }
       return Response.json(results, { headers: CORS });
+    }
+
+    // 縮網址代理:只縮 stock-pk 自己的分享連結(防當公開短網址濫用),
+    // 用 CREATE_TOKEN(secret)呼叫 devbox /api/links,回短網址。
+    if (req.method === "GET" && path === "/api/share") {
+      const target = url.searchParams.get("u") ?? "";
+      if (!target.startsWith(SHARE_PREFIX) || target.length > 2048) {
+        return Response.json({ error: "bad_url" }, { status: 400, headers: CORS });
+      }
+      if (!env.CREATE_TOKEN || !env.DEVBOX) {
+        return Response.json({ error: "unavailable" }, { status: 503, headers: CORS });
+      }
+      try {
+        // 經 service binding 呼叫 devbox(host 隨意,binding 直接路由到 devbox-api)。
+        const r = await env.DEVBOX.fetch(SHORTEN_API, {
+          method: "POST",
+          headers: { authorization: `Bearer ${env.CREATE_TOKEN}`, "content-type": "application/json" },
+          body: JSON.stringify({ url: target }),
+        });
+        if (!r.ok) return Response.json({ error: "upstream" }, { status: 502, headers: CORS });
+        const data = (await r.json()) as { shortUrl?: string };
+        if (!data.shortUrl) return Response.json({ error: "upstream" }, { status: 502, headers: CORS });
+        return Response.json({ shortUrl: data.shortUrl }, { headers: CORS });
+      } catch {
+        return Response.json({ error: "upstream" }, { status: 502, headers: CORS });
+      }
     }
 
     return new Response("stock-pk api", { status: 200, headers: CORS });

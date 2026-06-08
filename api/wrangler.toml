@@ -7,4 +7,10 @@ binding = "DB"
 database_name = "stockpk"
 database_id = "28c3bf82-2587-47a7-8d46-1dee03c6eeb7"
 
+# Service binding:呼叫 Derek 的 devbox 短網址服務(同帳號內部直連,避開 error 1042)。
+[[services]]
+binding = "DEVBOX"
+service = "devbox-api"
+
 # secret: wrangler secret put VISIT_SALT
+# secret: wrangler secret put CREATE_TOKEN(devbox 建短網址的 bearer)

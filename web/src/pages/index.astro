@@ -99,7 +99,7 @@ import { PRESETS } from "../lib/dates";
   import { presetRange, clampEnd, validRange, toYmd } from "../lib/dates";
   import { computeCompare, normalizeSplits, type SeriesInput, type CompareResult } from "../lib/compare";
   import { COLORS, renderChartSvg, type ChartLine } from "../lib/chart";
-  import { fetchCompare } from "../lib/api";
+  import { fetchCompare, shortenUrl } from "../lib/api";
   import { initSlots, getSelectedTickers, getSelectedNames } from "../lib/slots-ui";
   import { encodeState, parseState, type ShareState } from "../lib/share";
 
@@ -421,18 +421,24 @@ import { PRESETS } from "../lib/dates";
   shareBtn.id = "share";
   shareBtn.className = "sharebtn";
   shareBtn.textContent = "🔗 複製分享連結";
+  const SHARE_LABEL = "🔗 複製分享連結";
   let shareResetTimer: number | undefined;
-  shareBtn.addEventListener("click", () => {
-    void navigator.clipboard?.writeText(location.href).then(
-      () => {
-        shareBtn.textContent = "已複製 ✓";
-        window.clearTimeout(shareResetTimer);
-        shareResetTimer = window.setTimeout(() => {
-          shareBtn.textContent = "🔗 複製分享連結";
-        }, 1500);
-      },
-      () => { /* clipboard 失敗:無聲,使用者可手動複製網址 */ },
-    );
+  shareBtn.addEventListener("click", async () => {
+    shareBtn.disabled = true;
+    shareBtn.textContent = "產生短網址…";
+    const short = await shortenUrl(location.href); // 走 devbox 短網址服務
+    const text = short ?? location.href;           // 失敗就用長網址
+    try {
+      await navigator.clipboard.writeText(text);
+      shareBtn.textContent = short ? "已複製短網址 ✓" : "已複製長網址 ✓";
+    } catch {
+      // clipboard 不可用 → 顯示出來讓使用者手動複製
+      showNote("分享連結:" + text);
+      shareBtn.textContent = SHARE_LABEL;
+    }
+    shareBtn.disabled = false;
+    window.clearTimeout(shareResetTimer);
+    shareResetTimer = window.setTimeout(() => { shareBtn.textContent = SHARE_LABEL; }, 2200);
   });
   function renderShareBtn(): void {
     // 置於 chart 之後、note 之前;若已在 DOM 不重複插入。

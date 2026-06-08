@@ -4,6 +4,20 @@ const API = import.meta.env.PUBLIC_API_URL ?? "https://stock-pk-api.chinte-cheng
 
 export interface CompareApiError { error: string; }
 
+/** 用後端 /api/share(走 Derek 的 devbox 短網址服務)把長分享網址縮短。失敗回 null。 */
+export async function shortenUrl(longUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${API}/api/share?u=${encodeURIComponent(longUrl)}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as { shortUrl?: string };
+    return d.shortUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** 打 Worker 取多檔 adjclose 序列。回 SeriesInput[] 或 throw。 */
 export async function fetchCompare(
   tickers: string[],

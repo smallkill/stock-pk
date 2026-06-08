@@ -26,3 +26,18 @@ describe("guardrails", () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe("GET /api/share", () => {
+  it("非 stock-pk 網址 → 400", async () => {
+    const r = await SELF.fetch("https://x/api/share?u=" + encodeURIComponent("https://evil.com/"));
+    expect(r.status).toBe(400);
+  });
+  it("缺 u → 400", async () => {
+    const r = await SELF.fetch("https://x/api/share");
+    expect(r.status).toBe(400);
+  });
+  it("合法 stock-pk 網址但測試環境無 CREATE_TOKEN → 503", async () => {
+    const r = await SELF.fetch("https://x/api/share?u=" + encodeURIComponent("https://derek-stock-pk.pages.dev/?t=2330.TW"));
+    expect(r.status).toBe(503);
+  });
+});
