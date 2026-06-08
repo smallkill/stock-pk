@@ -19,6 +19,7 @@ export interface CompareResult {
   from: number;         // 共同起點 unix 秒
   to: number;           // 共同終點
   adjusted: boolean;    // 區間是否因對齊被調整
+  overlap: boolean;     // 所有檔在共同區間是否有重疊資料(false → stocks 為空,UI 顯示提示)
 }
 
 /** 取共同區間 [from,to]:from=各檔最早日的最大值,to=各檔最末日的最小值。 */
@@ -50,6 +51,10 @@ export function computeCompare(
   const adjusted = from !== reqFrom || to !== reqTo;
 
   const clipped = series.map((s) => ({ s, c: clip(s, from, to) }));
+  // 不重疊保護:共同區間無效(from>to)或任一檔在區間內無資料 → 不算,避免 NaN。
+  if (from > to || clipped.some(({ c }) => c.adj.length === 0)) {
+    return { stocks: [], winner: "", from, to, adjusted: true, overlap: false };
+  }
   const interim = clipped.map(({ s, c }) => {
     const adjStart = c.adj[0];
     const adjEnd = c.adj[c.adj.length - 1];
@@ -67,5 +72,5 @@ export function computeCompare(
   }));
 
   const winner = stocks.reduce((w, s) => (s.final > w.final ? s : w), stocks[0]).ticker;
-  return { stocks, winner, from, to, adjusted };
+  return { stocks, winner, from, to, adjusted, overlap: true };
 }

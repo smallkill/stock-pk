@@ -43,3 +43,13 @@ describe("computeCompare", () => {
     expect(a.roi).toBeCloseTo(200 / 150 - 1); // 從 day20(150) 起算
   });
 });
+
+describe("computeCompare 不重疊保護", () => {
+  it("兩檔日期完全不重疊 → overlap=false、stocks 空、無 NaN", () => {
+    const a = { ticker: "A.TW", name: "A", days: [10, 20], adj: [1, 2] };
+    const b = { ticker: "B.TW", name: "B", days: [30, 40], adj: [3, 4] };
+    const r = computeCompare([a, b], 100000, "A.TW");
+    expect(r.overlap).toBe(false);
+    expect(r.stocks).toEqual([]);
+  });
+});
