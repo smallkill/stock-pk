@@ -5,3 +5,4 @@ dist/
 .cf_*
 .DS_Store
 web/public/stocks.json
+web/.astro/

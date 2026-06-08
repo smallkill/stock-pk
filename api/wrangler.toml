@@ -1,0 +1,10 @@
+name = "stock-pk-api"
+main = "src/index.ts"
+compatibility_date = "2025-09-06"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "stockpk"
+database_id = "PLACEHOLDER_FILL_AFTER_d1_create"
+
+# secret: wrangler secret put VISIT_SALT
