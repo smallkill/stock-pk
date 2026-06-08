@@ -1,7 +1,27 @@
 import { recordVisit, fetchVisitStats } from "./visits";
 import { fetchChart } from "./yahoo";
 
-export interface Env { DB: D1Database; VISIT_SALT?: string; CREATE_TOKEN?: string; DEVBOX?: Fetcher; }
+// Cloudflare Rate Limiting binding(per-colo「寬鬆過濾」,非精確;當濫用煞車用)。
+interface RateLimiter {
+  limit(opts: { key: string }): Promise<{ success: boolean }>;
+}
+export interface Env {
+  DB: D1Database;
+  VISIT_SALT?: string;
+  CREATE_TOKEN?: string;
+  DEVBOX?: Fetcher;
+  RL?: RateLimiter; // optional:miniflare 測試不提供,缺少時放行
+}
+
+/** 速率限制查詢;無 binding 或出錯 → fail-open 放行。 */
+async function rlOk(env: Env, key: string): Promise<boolean> {
+  if (!env.RL) return true;
+  try {
+    return (await env.RL.limit({ key })).success;
+  } catch {
+    return true;
+  }
+}
 
 const CORS = { "access-control-allow-origin": "*" };
 const MAX_TICKERS = 5;
@@ -29,6 +49,10 @@ export default {
     }
 
     if (req.method === "GET" && path === "/api/compare") {
+      // 速率煞車:防被當免費行情 API 刷量(快取仍是主要緩解)。
+      const ip = req.headers.get("cf-connecting-ip") ?? "0.0.0.0";
+      if (!(await rlOk(env, "compare:" + ip)))
+        return Response.json({ error: "rate_limit" }, { status: 429, headers: CORS });
       const raw = (url.searchParams.get("tickers") ?? "").split(",").map((t) => t.trim()).filter(Boolean);
       const from = Number(url.searchParams.get("from"));
       const to = Number(url.searchParams.get("to"));
@@ -66,6 +90,11 @@ export default {
       const target = url.searchParams.get("u") ?? "";
       if (!target.startsWith(SHARE_PREFIX) || target.length > 2048) {
         return Response.json({ error: "bad_url" }, { status: 400, headers: CORS });
+      }
+      // 速率煞車:限制建短網址的頻率(會在 devbox D1 建列)。
+      const shareIp = req.headers.get("cf-connecting-ip") ?? "0.0.0.0";
+      if (!(await rlOk(env, "share:" + shareIp))) {
+        return Response.json({ error: "rate_limit" }, { status: 429, headers: CORS });
       }
       if (!env.CREATE_TOKEN || !env.DEVBOX) {
         return Response.json({ error: "unavailable" }, { status: 503, headers: CORS });
