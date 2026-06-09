@@ -66,7 +66,8 @@ export default {
       const cache = caches.default;
       const results = await Promise.all(
         raw.map(async (ticker) => {
-          const key = new Request(`https://cache/${ticker}/${from}/${to}`);
+          // v2:回應新增 close 欄位,換 key 讓舊的(無 close)快取失效
+          const key = new Request(`https://cache/v2/${ticker}/${from}/${to}`);
           const hit = await cache.match(key);
           if (hit) return hit.json();
           const parsed = await fetchChart(ticker, from, to);

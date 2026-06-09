@@ -107,7 +107,7 @@ import { PRESETS } from "../lib/dates";
 </style>
 
 <script>
-  import { presetRange, clampEnd, validRange, toYmd } from "../lib/dates";
+  import { presetRange, clampEnd, validRange, toYmd, detailRange, DETAIL_RANGES } from "../lib/dates";
   import { computeCompare, normalizeSplits, type SeriesInput, type CompareResult } from "../lib/compare";
   import { COLORS, renderChartSvg, renderPriceSvg, fmtPrice, type ChartLine } from "../lib/chart";
   import { fetchCompare, shortenUrl } from "../lib/api";
@@ -181,6 +181,15 @@ import { PRESETS } from "../lib/dates";
   let openTicker: string | null = null;
   let lastResult: CompareResult | null = null;
   let detachDetailHover: (() => void) | null = null;
+  let detailReq = 0;  // 競態保護:每次切區間 +1,慢回應的舊請求作廢
+  const detailCache = new Map<string, SeriesInput>(); // key `ticker|fromYmd|toYmd` → 單檔序列
+  let detailMode: "adj" | "close" = "adj";   // 含息還原價 / 原始股價(除息),session 內記住
+  // 目前 detail 顯示中的序列(供切模式免重抓重畫)
+  let detailCurrent: { color: string; days: number[]; adj: number[]; close: number[] } | null = null;
+  let detailBox: HTMLElement | null = null;  // detail 圖容器
+  let detailSub: HTMLElement | null = null;  // detail 副標(顯示模式 + 區間)
+  let detachDetailDropdown: (() => void) | null = null; // 「更多」下拉的 outside-click 解綁
+  const MORE_KEYS = ["1y", "5y", "max"];     // 收進「更多」下拉的區間
 
   // ----- 把目前比較狀態寫進網址(不重整)-----
   // 用 lastSeries 的 ticker(實際算出的標的)+ 目前表單日期/金額 + baseTicker。
@@ -315,7 +324,12 @@ import { PRESETS } from "../lib/dates";
   function closeDetail(): void {
     detachDetailHover?.();
     detachDetailHover = null;
+    detachDetailDropdown?.();
+    detachDetailDropdown = null;
     openTicker = null;
+    detailCurrent = null;
+    detailBox = null;
+    detailSub = null;
     detailEl.replaceChildren();
     detailEl.hidden = true;
     detailEl.style.borderColor = "";   // 清掉上次的股色身分
@@ -389,7 +403,105 @@ import { PRESETS } from "../lib/dates";
     };
   }
 
-  // 渲染某檔的含息還原價走勢(截到共同區間)。
+  const modeLabel = (): string => (detailMode === "adj" ? "含息還原價" : "原始股價");
+
+  // 依目前 detailCurrent + detailMode 畫圖(切模式時免重抓直接重畫)。
+  function drawDetail(): void {
+    if (!detailCurrent || !detailBox || !detailSub) return;
+    detachDetailHover?.();
+    detachDetailHover = null;
+    const { days, color } = detailCurrent;
+    const prices = detailMode === "adj" ? detailCurrent.adj : detailCurrent.close;
+    if (days.length === 0 || prices.length === 0) {
+      detailBox.replaceChildren();
+      const empty = document.createElement("p");
+      empty.className = "dsub"; empty.textContent = "此區間無資料。";
+      detailBox.appendChild(empty);
+      detailSub.textContent = modeLabel();
+      return;
+    }
+    const w = detailEl.clientWidth || 700;
+    const { svg, pointX } = renderPriceSvg(days, prices, color, w, 220);
+    detailBox.innerHTML = svg;
+    attachPriceHover(detailBox, days, prices, pointX);
+    const span = `${fmtDate(days[0])}–${fmtDate(days[days.length - 1])}`;
+    // 原始股價會在除權息/拆股當天跳空(真實掛牌價),提示一下免得被誤會成資料壞掉。
+    detailSub.textContent = detailMode === "close"
+      ? `原始股價 · ${span} · 除權息/拆股會跳空`
+      : `含息還原價 · ${span}`;
+  }
+
+  // 設定 detail 區間的高亮:inline 鈕 + 「更多」鈕(選到下拉項時 label 變該項)。
+  function setActiveRange(key: string | null): void {
+    const ranges = detailEl.querySelector(".dranges");
+    if (!ranges) return;
+    ranges.querySelectorAll<HTMLButtonElement>(".drbtn[data-range]").forEach((b) => {
+      b.classList.toggle("active", b.dataset.range === key);
+    });
+    const moreBtn = ranges.querySelector<HTMLButtonElement>(".dmorebtn");
+    if (moreBtn) {
+      const picked = key && MORE_KEYS.includes(key) ? DETAIL_RANGES.find((r) => r.key === key) : null;
+      moreBtn.textContent = (picked ? picked.label : "更多") + " ▾";
+      moreBtn.classList.toggle("active", !!picked);
+    }
+  }
+
+  // 選某個區間:單獨重抓這檔的資料(超出比較區間也能看),重畫。競態保護 + cache。
+  async function selectDetailRange(ticker: string, color: string, key: string): Promise<void> {
+    const myReq = ++detailReq;
+    setActiveRange(key);
+
+    const now = Date.now();
+    const { from, to } = detailRange(key, now);
+    const toClamped = clampEnd(to, now);
+    const fromSec = Math.floor(from / 1000);
+    const toSec = Math.floor(toClamped / 1000);
+    // cache key 用「日」粒度(toSec 含 now 毫秒會每次不同→永遠 miss);歷史日線同一天資料相同。
+    const cacheKey = `${ticker}|${toYmd(from)}|${toYmd(toClamped)}`;
+
+    let series = detailCache.get(cacheKey) ?? null;
+    if (!series) {
+      if (detailSub) detailSub.textContent = "讀取中…";
+      try {
+        const got = await fetchCompare([ticker], fromSec, toSec);
+        if (got[0]) {
+          got[0].adj = normalizeSplits(got[0].adj);
+          series = got[0];
+          // 上限 60 筆,超過淘汰最舊(Map 保留插入序);防長壽分頁無限成長。
+          if (detailCache.size >= 60) { const oldest = detailCache.keys().next().value; if (oldest) detailCache.delete(oldest); }
+          detailCache.set(cacheKey, got[0]);
+        }
+      } catch { series = null; }
+    }
+    // 期間若使用者又切了別的區間 / 關了面板 / 換了檔 → 此回應作廢
+    if (myReq !== detailReq || openTicker !== ticker) return;
+
+    if (!series) {
+      detachDetailHover?.(); detachDetailHover = null;
+      detailBox?.replaceChildren();
+      if (detailBox) {
+        const err = document.createElement("p");
+        err.className = "dsub"; err.textContent = "讀取失敗,請稍後再試。";
+        detailBox.appendChild(err);
+      }
+      if (detailSub) detailSub.textContent = modeLabel();
+      return;
+    }
+
+    let days = series.days, adj = series.adj, close = series.close ?? series.adj;
+    if (key === "5d") { days = days.slice(-5); adj = adj.slice(-5); close = close.slice(-5); }
+    detailCurrent = { color, days, adj, close };
+    drawDetail();
+  }
+
+  // 關閉「更多」下拉。
+  function closeDropdown(): void {
+    detachDetailDropdown?.();
+    detachDetailDropdown = null;
+    detailEl.querySelector(".dmenu")?.setAttribute("hidden", "");
+  }
+
+  // 渲染某檔的展開面板(預設顯示比較共同區間;區間選擇器 inline+更多下拉;含息/原始切換)。
   function renderDetail(ticker: string): void {
     if (!lastSeries || !lastResult) return;
     const s = lastSeries.find((x) => x.ticker === ticker);
@@ -397,17 +509,20 @@ import { PRESETS } from "../lib/dates";
     const idx = lastResult.stocks.findIndex((x) => x.ticker === ticker);
     const color = COLORS[(idx < 0 ? 0 : idx) % COLORS.length];
 
-    // 截共同區間 [from,to]
-    const days: number[] = [];
-    const prices: number[] = [];
+    // 預設:截比較共同區間 [from,to](用已抓資料,免重抓),adj+close 都備好
+    const days: number[] = [], adj: number[] = [], close: number[] = [];
+    const srcClose = s.close ?? s.adj;
     for (let i = 0; i < s.days.length; i++) {
       if (s.days[i] >= lastResult.from && s.days[i] <= lastResult.to) {
-        days.push(s.days[i]); prices.push(s.adj[i]);
+        days.push(s.days[i]); adj.push(s.adj[i]); close.push(srcClose[i]);
       }
     }
 
     detachDetailHover?.();
     detachDetailHover = null;
+    detachDetailDropdown?.();
+    detachDetailDropdown = null;
+    detailReq++;   // 作廢任何進行中的舊區間請求
     detailEl.replaceChildren();
     detailEl.hidden = false;
     // 用該股顏色當身分:色框 + 淡底(色碼後綴 "14" ≈ 8% alpha),與下面中性的比較圖區隔。
@@ -420,7 +535,7 @@ import { PRESETS } from "../lib/dates";
     pointer.style.borderBottomColor = color;
     detailEl.appendChild(pointer);
 
-    // 標頭
+    // 標頭:eyebrow + 色塊 + 股名 ……（右)收起
     const head = document.createElement("div");
     head.className = "dhead";
     const eyebrow = document.createElement("span");
@@ -430,17 +545,76 @@ import { PRESETS } from "../lib/dates";
     sw.className = "dswatch"; sw.style.background = color;
     const nm = document.createElement("span");
     nm.className = "dnm"; nm.textContent = s.name;
-    const sub = document.createElement("span");
-    sub.className = "dsub"; sub.textContent = "含息還原價走勢";
-    const close = document.createElement("button");
-    close.type = "button"; close.className = "dclose"; close.textContent = "收起 ✕";
-    close.addEventListener("click", (e) => { e.stopPropagation(); closeDetail(); });
-    head.append(eyebrow, sw, nm, sub, close);
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button"; closeBtn.className = "dclose"; closeBtn.textContent = "收起 ✕";
+    closeBtn.addEventListener("click", () => closeDetail());
+    head.append(eyebrow, sw, nm, closeBtn);
+
+    // 控制列:左=區間(inline + 更多下拉),右=含息/原始切換
+    const controls = document.createElement("div");
+    controls.className = "dcontrols";
+
+    const ranges = document.createElement("div");
+    ranges.className = "dranges";
+    const mkRangeBtn = (key: string, label: string, cls: string): HTMLButtonElement => {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = cls; btn.dataset.range = key; btn.textContent = label;
+      btn.addEventListener("click", () => { closeDropdown(); void selectDetailRange(ticker, color, key); });
+      return btn;
+    };
+    for (const r of DETAIL_RANGES.filter((x) => !MORE_KEYS.includes(x.key))) {
+      ranges.appendChild(mkRangeBtn(r.key, r.label, "drbtn"));
+    }
+    // 「更多 ▾」下拉
+    const moreWrap = document.createElement("div");
+    moreWrap.className = "dmore";
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button"; moreBtn.className = "drbtn dmorebtn"; moreBtn.textContent = "更多 ▾";
+    const menu = document.createElement("div");
+    menu.className = "dmenu"; menu.hidden = true;
+    for (const r of DETAIL_RANGES.filter((x) => MORE_KEYS.includes(x.key))) {
+      menu.appendChild(mkRangeBtn(r.key, r.label, "dmenuitem drbtn"));
+    }
+    moreBtn.addEventListener("click", () => {
+      if (!menu.hidden) { closeDropdown(); return; }
+      menu.hidden = false;
+      // 點面板外 → 關閉下拉
+      const onDoc = (ev: MouseEvent): void => { if (!moreWrap.contains(ev.target as Node)) closeDropdown(); };
+      document.addEventListener("mousedown", onDoc);
+      detachDetailDropdown = () => document.removeEventListener("mousedown", onDoc);
+    });
+    moreWrap.append(moreBtn, menu);
+    ranges.appendChild(moreWrap);
+
+    // 含息/原始 切換
+    const mode = document.createElement("div");
+    mode.className = "dmode";
+    ([["adj", "含息還原價"], ["close", "原始股價"]] as const).forEach(([m, label]) => {
+      const mb = document.createElement("button");
+      mb.type = "button"; mb.className = "dmbtn"; mb.dataset.mode = m; mb.textContent = label;
+      mb.classList.toggle("active", detailMode === m);
+      mb.addEventListener("click", () => {
+        if (detailMode === m) return;
+        detailMode = m;
+        mode.querySelectorAll<HTMLButtonElement>(".dmbtn").forEach((x) => {
+          x.classList.toggle("active", x.dataset.mode === m);
+        });
+        drawDetail();   // 免重抓,直接換陣列重畫
+      });
+      mode.appendChild(mb);
+    });
+
+    controls.append(ranges, mode);
+
+    const sub = document.createElement("div");
+    sub.className = "dsub";
 
     const box = document.createElement("div");
     box.className = "dbox";
 
-    detailEl.append(head, box);
+    detailEl.append(head, controls, sub, box);
+    detailBox = box;
+    detailSub = sub;
 
     // 三角對齊被點卡片的水平中心(相對 detail 面板),夾在面板內避免超出。
     const activeCard = cardsEl.querySelector<HTMLElement>(
@@ -457,17 +631,10 @@ import { PRESETS } from "../lib/dates";
       pointer.style.left = "24px";
     }
 
-    if (prices.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "dsub"; empty.textContent = "此區間無資料。";
-      box.appendChild(empty);
-      return;
-    }
-
-    const w = detailEl.clientWidth || 700;
-    const { svg, pointX } = renderPriceSvg(days, prices, color, w, 220);
-    box.innerHTML = svg;
-    attachPriceHover(box, days, prices, pointX);
+    // 預設畫比較區間(免重抓);不高亮任何區間鈕(=比較區間)
+    detailCurrent = { color, days, adj, close };
+    setActiveRange(null);
+    drawDetail();
   }
 
   // 切換某檔展開(點同一檔=收起)。
@@ -720,7 +887,14 @@ import { PRESETS } from "../lib/dates";
         : null;
       const fav = series.find((s) => s.ticker.startsWith("0050."));
       baseTicker = prefer ?? (fav ? fav.ticker : series[0]?.ticker ?? "");
-      render(computeCompare(series, amount, baseTicker));
+      const result = computeCompare(series, amount, baseTicker);
+      // 「最久」算完後,把起日欄位更新成實際共同最早日(而非顯示 sentinel 1990),
+      // 也讓接著 render→syncUrl 寫進網址的是真實日期。設 .value 不觸發 input 事件,最久高亮保留。
+      const maxBtn = presetsEl.querySelector<HTMLButtonElement>('.preset[data-key="max"]');
+      if (maxBtn?.classList.contains("active") && result.overlap) {
+        fromEl.value = toYmd(result.from * 1000);
+      }
+      render(result);
     } catch (e) {
       const code = e instanceof Error ? e.message : "unknown";
       const friendly =

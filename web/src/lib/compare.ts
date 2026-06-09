@@ -1,8 +1,10 @@
 export interface SeriesInput {
   ticker: string;
   name: string;
-  days: number[]; // 交易日 unix 秒,遞增
-  adj: number[];  // 對應 adjclose(已濾 null)
+  days: number[];   // 交易日 unix 秒,遞增
+  adj: number[];    // 對應 adjclose(含息還原價,已濾 null)
+  close?: number[]; // 原始收盤(除息價);後端新增,舊回應可能缺 → 前端回退整條 adj。
+                    // 不變式:存在時 close.length === adj.length === days.length(後端同步 push)
 }
 
 /**
