@@ -150,3 +150,90 @@ export function renderChartSvg(
 
   return { svg: parts.join(""), pointX };
 }
+
+/** 股價軸標籤:千分位整數(<1000 帶兩位小數,股價常見如 34.85)。 */
+export function fmtPrice(v: number): string {
+  if (Math.abs(v) >= 1000) return Math.round(v).toLocaleString("en-US");
+  return (Math.round(v * 100) / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** 畫單檔股價走勢:單線、左 Y=股價、X=日期、格線。
+ *  prices 與 days 對齊(同一批交易日);在 client 以容器實際像素 w/h 呼叫。
+ *  回 svg 字串 + 每資料點像素 x(給 hover 對位)。 */
+export function renderPriceSvg(
+  days: number[],
+  prices: number[],
+  color: string,
+  w: number,
+  h: number,
+): ChartRender {
+  const head = `<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">`;
+  if (prices.length === 0) return { svg: `${head}</svg>`, pointX: [] };
+
+  const pad = { l: 52, r: 14, t: 12, b: 28 };
+  const innerW = w - pad.l - pad.r;
+  const innerH = h - pad.t - pad.b;
+  const n = prices.length;
+
+  let min = Math.min(...prices);
+  let max = Math.max(...prices);
+  if (min === max) { min -= 1; max += 1; } // 退化保護
+
+  const ticks = niceTicks(min, max, 4);
+  const tMin = Math.min(min, ticks[0]);
+  const tMax = Math.max(max, ticks[ticks.length - 1]);
+  const span = tMax - tMin || 1;
+
+  const x = (i: number) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const y = (v: number) => pad.t + innerH - ((v - tMin) / span) * innerH;
+
+  const parts: string[] = [head];
+
+  // Y 格線 + 左股價
+  for (const t of ticks) {
+    const yy = y(t).toFixed(1);
+    parts.push(
+      `<line x1="${pad.l}" y1="${yy}" x2="${w - pad.r}" y2="${yy}" stroke="#e5e7eb" stroke-width="1" />`,
+    );
+    parts.push(
+      `<text x="${pad.l - 6}" y="${(Number(yy) + 3).toFixed(1)}" font-size="10" fill="#6b7280" text-anchor="end">${esc(fmtPrice(t))}</text>`,
+    );
+  }
+
+  // X 軸日期標籤(~5 個等距 index)
+  const xCount = Math.min(5, n);
+  const seen = new Set<number>();
+  for (let k = 0; k < xCount; k++) {
+    const i = xCount === 1 ? 0 : Math.round((k / (xCount - 1)) * (n - 1));
+    if (seen.has(i)) continue;
+    seen.add(i);
+    const sec = days[i];
+    if (sec === undefined) continue;
+    const anchor = k === 0 ? "start" : k === xCount - 1 ? "end" : "middle";
+    parts.push(
+      `<text x="${x(i).toFixed(1)}" y="${(h - pad.b + 16).toFixed(1)}" font-size="10" fill="#6b7280" text-anchor="${anchor}">${esc(ymLabel(sec))}</text>`,
+    );
+  }
+
+  // 軸線(左、下)
+  parts.push(
+    `<line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${pad.t + innerH}" stroke="#9ca3af" stroke-width="1" />`,
+  );
+  parts.push(
+    `<line x1="${pad.l}" y1="${pad.t + innerH}" x2="${w - pad.r}" y2="${pad.t + innerH}" stroke="#9ca3af" stroke-width="1" />`,
+  );
+
+  // 折線
+  const pts = prices.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  parts.push(`<polyline fill="none" stroke="${color}" stroke-width="2" points="${pts}" />`);
+
+  parts.push("</svg>");
+
+  const pointX: number[] = [];
+  for (let i = 0; i < n; i++) pointX.push(x(i));
+
+  return { svg: parts.join(""), pointX };
+}
