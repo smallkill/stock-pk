@@ -3,6 +3,8 @@
 ---
 <section id="results" hidden>
   <div id="cards" class="cards"></div>
+  <div id="detail" class="detail" hidden></div>
+  <h3 id="chart-title" class="chart-title" hidden>多檔成長比較</h3>
   <div id="chart" class="chart"></div>
   <p id="note" class="note"></p>
 </section>
@@ -13,7 +15,7 @@
   .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.9rem}
   .card{
     position:relative;border:1px solid var(--line);border-radius:14px;background:var(--bg-elev);
-    padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.5rem;
+    padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.5rem;cursor:pointer;
   }
   .card.win{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .card .swatch{position:absolute;top:1.05rem;right:1.05rem;width:.85rem;height:.85rem;border-radius:3px}
@@ -31,8 +33,32 @@
   }
   .card .basebtn:hover{border-color:var(--accent);color:var(--accent)}
   .card.isbase .basebtn{background:var(--accent);color:#fff;border-color:var(--accent);cursor:default}
+  .card.detailopen{border-color:var(--accent)}  /* 展開時的後備邊框;實際由 JS 設為股色 */
+  .card .basebtn{cursor:pointer}
 
-  .chart{margin-top:1.4rem;position:relative}
+  .detail{position:relative;margin-top:1.3rem;border:1.5px solid var(--accent);border-radius:14px;background:var(--bg-elev);padding:1rem 1.1rem}
+  /* 指向被點開卡片的小三角(left 由 JS 對齊卡片中心)*/
+  .detail .dpointer{position:absolute;top:-9px;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:9px solid var(--accent)}
+  .detail .dhead{display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem}
+  .detail .deyebrow{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:.12rem .4rem;border-radius:6px;background:var(--accent);color:#fff;flex:none}
+  .detail .dswatch{width:.8rem;height:.8rem;border-radius:3px;flex:none}
+  .detail .dnm{font-weight:700;font-size:.95rem}
+  .detail .dsub{font-size:.78rem;color:var(--muted)}
+  .detail .dclose{margin-left:auto;font-size:.74rem;padding:.2rem .55rem;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--muted);cursor:pointer;font-family:var(--sans)}
+  .detail .dclose:hover{border-color:var(--accent);color:var(--accent)}
+  .detail .dbox{position:relative}
+  .detail .dbox svg{width:100%;height:220px;display:block}
+  .detail .cursor{position:absolute;top:0;width:1px;background:#9ca3af;pointer-events:none;z-index:4}
+  .detail .tip{
+    position:absolute;pointer-events:none;background:var(--bg-elev);border:1px solid var(--line);
+    border-radius:8px;padding:.5rem .6rem;font-size:.76rem;color:var(--ink);
+    box-shadow:0 6px 20px -12px rgba(0,0,0,.4);white-space:nowrap;z-index:5;
+  }
+  .detail .tip .tip-date{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-bottom:.25rem}
+  .detail .tip .tip-val{font-family:var(--mono);font-weight:700}
+
+  .chart-title{margin:1.6rem 0 .2rem;font-size:.9rem;font-weight:700;color:var(--ink-soft)}
+  .chart{margin-top:.5rem;position:relative}
   .chart svg{width:100%;height:240px;display:block;border:1px solid var(--line);border-radius:14px;background:var(--bg-elev)}
   .chart .cursor{position:absolute;top:0;width:1px;background:#9ca3af;pointer-events:none;z-index:4}
   .chart .tip{

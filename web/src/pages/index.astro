@@ -37,7 +37,10 @@ import { PRESETS } from "../lib/dates";
           <input type="number" id="amount" value="100000" min="1" step="1000" />
         </div>
       </div>
-      <button id="run" type="button" class="run">計算 PK →</button>
+      <div class="actions">
+        <button id="clear" type="button" class="clear">清除</button>
+        <button id="run" type="button" class="run">計算 PK →</button>
+      </div>
     </div>
   </section>
 
@@ -87,18 +90,26 @@ import { PRESETS } from "../lib/dates";
   .run:hover{filter:brightness(1.05)}
   .run:disabled{opacity:.6;cursor:progress}
 
+  .actions{display:flex;align-items:center;gap:.6rem}
+  .clear{
+    padding:.75rem 1.1rem;border:1px solid var(--line);border-radius:11px;background:var(--bg);color:var(--ink-soft);
+    font-family:var(--sans);font-weight:600;font-size:.92rem;cursor:pointer;
+  }
+  .clear:hover{border-color:var(--accent);color:var(--accent)}
+
   @media (max-width:560px){
     .hero h1{font-size:1.7rem}
     .amount-row{flex-direction:column;align-items:stretch}
     .amount-input input{width:100%}
-    .run{width:100%}
+    .actions{width:100%}
+    .run{flex:1}
   }
 </style>
 
 <script>
   import { presetRange, clampEnd, validRange, toYmd } from "../lib/dates";
   import { computeCompare, normalizeSplits, type SeriesInput, type CompareResult } from "../lib/compare";
-  import { COLORS, renderChartSvg, type ChartLine } from "../lib/chart";
+  import { COLORS, renderChartSvg, renderPriceSvg, fmtPrice, type ChartLine } from "../lib/chart";
   import { fetchCompare, shortenUrl } from "../lib/api";
   import { initSlots, getSelectedTickers, getSelectedNames } from "../lib/slots-ui";
   import { encodeState, parseState, type ShareState } from "../lib/share";
@@ -108,11 +119,19 @@ import { PRESETS } from "../lib/dates";
   const toEl = document.getElementById("to") as HTMLInputElement;
   const amountEl = document.getElementById("amount") as HTMLInputElement;
   const runEl = document.getElementById("run") as HTMLButtonElement;
+  const clearEl = document.getElementById("clear") as HTMLButtonElement;
   const presetsEl = document.getElementById("presets")!;
   const resultsEl = document.getElementById("results") as HTMLElement;
   const cardsEl = document.getElementById("cards")!;
+  const detailEl = document.getElementById("detail") as HTMLElement;
+  const chartTitleEl = document.getElementById("chart-title") as HTMLElement;
   const chartEl = document.getElementById("chart")!;
   const noteEl = document.getElementById("note")!;
+
+  // ----- 清除:回到乾淨首頁(清掉網址查詢、所有選取與結果)-----
+  clearEl.addEventListener("click", () => {
+    location.href = location.pathname;
+  });
 
   // ----- 槽位:於 bootstrap()(檔末)依網址狀態初始化 -----
 
@@ -158,6 +177,10 @@ import { PRESETS } from "../lib/dates";
   let lastSeries: SeriesInput[] | null = null;
   let lastAmount = 0;
   let baseTicker = "";
+  // 單檔股價展開:目前展開的 ticker(null=關閉)、共同區間、hover 解綁。
+  let openTicker: string | null = null;
+  let lastResult: CompareResult | null = null;
+  let detachDetailHover: (() => void) | null = null;
 
   // ----- 把目前比較狀態寫進網址(不重整)-----
   // 用 lastSeries 的 ticker(實際算出的標的)+ 目前表單日期/金額 + baseTicker。
@@ -287,17 +310,192 @@ import { PRESETS } from "../lib/dates";
     };
   }
 
+  // ----- 單檔股價展開面板 -----
+  // 關閉並清空 detail 面板。
+  function closeDetail(): void {
+    detachDetailHover?.();
+    detachDetailHover = null;
+    openTicker = null;
+    detailEl.replaceChildren();
+    detailEl.hidden = true;
+    detailEl.style.borderColor = "";   // 清掉上次的股色身分
+    detailEl.style.background = "";
+    clearActiveCards();
+  }
+
+  // 移除所有卡片的展開高亮(class + inline 股色邊框)。
+  function clearActiveCards(): void {
+    cardsEl.querySelectorAll<HTMLElement>(".card.detailopen").forEach((c) => {
+      c.classList.remove("detailopen");
+      c.style.borderColor = "";
+    });
+  }
+
+  // detail 圖的 hover:垂直游標 + tooltip(日期 + 股價)。
+  function attachPriceHover(
+    box: HTMLElement, days: number[], prices: number[], pointX: number[],
+  ): void {
+    detachDetailHover?.();
+    detachDetailHover = null;
+    if (pointX.length === 0) return;
+
+    const cursor = document.createElement("div");
+    cursor.className = "cursor"; cursor.hidden = true;
+    const tip = document.createElement("div");
+    tip.className = "tip"; tip.hidden = true;
+    box.append(cursor, tip);
+    const svgEl = box.querySelector("svg");
+    const targetH = svgEl ? svgEl.clientHeight || 220 : 220;
+
+    const nearest = (px: number): number => {
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < pointX.length; i++) {
+        const d = Math.abs(pointX[i] - px);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      return best;
+    };
+
+    const onMove = (ev: MouseEvent): void => {
+      const rect = box.getBoundingClientRect();
+      const idx = nearest(ev.clientX - rect.left);
+      const cx = pointX[idx];
+      cursor.hidden = false;
+      cursor.style.left = cx + "px";
+      cursor.style.height = targetH + "px";
+      tip.replaceChildren();
+      const dl = document.createElement("div");
+      dl.className = "tip-date";
+      dl.textContent = fmtDate(days[idx]);
+      const vl = document.createElement("div");
+      vl.className = "tip-val";
+      vl.textContent = "NT$" + fmtPrice(prices[idx]);
+      tip.append(dl, vl);
+      tip.hidden = false;
+      const tw = tip.offsetWidth;
+      let tipX = cx + 12;
+      if (tipX + tw > rect.width) tipX = cx - 12 - tw;
+      if (tipX < 0) tipX = 0;
+      tip.style.left = tipX + "px";
+      tip.style.top = "8px";
+    };
+    const onLeave = (): void => { cursor.hidden = true; tip.hidden = true; };
+    box.addEventListener("mousemove", onMove);
+    box.addEventListener("mouseleave", onLeave);
+    detachDetailHover = () => {
+      box.removeEventListener("mousemove", onMove);
+      box.removeEventListener("mouseleave", onLeave);
+      cursor.remove(); tip.remove();
+    };
+  }
+
+  // 渲染某檔的含息還原價走勢(截到共同區間)。
+  function renderDetail(ticker: string): void {
+    if (!lastSeries || !lastResult) return;
+    const s = lastSeries.find((x) => x.ticker === ticker);
+    if (!s) return;
+    const idx = lastResult.stocks.findIndex((x) => x.ticker === ticker);
+    const color = COLORS[(idx < 0 ? 0 : idx) % COLORS.length];
+
+    // 截共同區間 [from,to]
+    const days: number[] = [];
+    const prices: number[] = [];
+    for (let i = 0; i < s.days.length; i++) {
+      if (s.days[i] >= lastResult.from && s.days[i] <= lastResult.to) {
+        days.push(s.days[i]); prices.push(s.adj[i]);
+      }
+    }
+
+    detachDetailHover?.();
+    detachDetailHover = null;
+    detailEl.replaceChildren();
+    detailEl.hidden = false;
+    // 用該股顏色當身分:色框 + 淡底(色碼後綴 "14" ≈ 8% alpha),與下面中性的比較圖區隔。
+    detailEl.style.borderColor = color;
+    detailEl.style.background = color + "14";
+
+    // 指向被點開卡片的小三角(left 於下方對齊卡片中心)
+    const pointer = document.createElement("div");
+    pointer.className = "dpointer";
+    pointer.style.borderBottomColor = color;
+    detailEl.appendChild(pointer);
+
+    // 標頭
+    const head = document.createElement("div");
+    head.className = "dhead";
+    const eyebrow = document.createElement("span");
+    eyebrow.className = "deyebrow"; eyebrow.textContent = "單檔股價";
+    eyebrow.style.background = color;
+    const sw = document.createElement("span");
+    sw.className = "dswatch"; sw.style.background = color;
+    const nm = document.createElement("span");
+    nm.className = "dnm"; nm.textContent = s.name;
+    const sub = document.createElement("span");
+    sub.className = "dsub"; sub.textContent = "含息還原價走勢";
+    const close = document.createElement("button");
+    close.type = "button"; close.className = "dclose"; close.textContent = "收起 ✕";
+    close.addEventListener("click", (e) => { e.stopPropagation(); closeDetail(); });
+    head.append(eyebrow, sw, nm, sub, close);
+
+    const box = document.createElement("div");
+    box.className = "dbox";
+
+    detailEl.append(head, box);
+
+    // 三角對齊被點卡片的水平中心(相對 detail 面板),夾在面板內避免超出。
+    const activeCard = cardsEl.querySelector<HTMLElement>(
+      `.card[data-ticker="${CSS.escape(ticker)}"]`,
+    );
+    if (activeCard) {
+      activeCard.style.borderColor = color;   // 卡片高亮邊框配股色,與面板/三角同色
+      const cr = activeCard.getBoundingClientRect();
+      const dr = detailEl.getBoundingClientRect();
+      const cx = cr.left + cr.width / 2 - dr.left;
+      const clamped = Math.max(12, Math.min(cx - 9, dr.width - 30));
+      pointer.style.left = clamped + "px";
+    } else {
+      pointer.style.left = "24px";
+    }
+
+    if (prices.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "dsub"; empty.textContent = "此區間無資料。";
+      box.appendChild(empty);
+      return;
+    }
+
+    const w = detailEl.clientWidth || 700;
+    const { svg, pointX } = renderPriceSvg(days, prices, color, w, 220);
+    box.innerHTML = svg;
+    attachPriceHover(box, days, prices, pointX);
+  }
+
+  // 切換某檔展開(點同一檔=收起)。
+  function toggleDetail(ticker: string): void {
+    if (openTicker === ticker) { closeDetail(); return; }
+    openTicker = ticker;
+    clearActiveCards();
+    // ticker 含 "."(如 0050.TW),CSS 選擇器要 escape,否則 . 被當 class 選擇器而選不到。
+    cardsEl.querySelector(`.card[data-ticker="${CSS.escape(ticker)}"]`)?.classList.add("detailopen");
+    renderDetail(ticker);
+    detailEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
   // ----- 渲染卡片 + 圖(用目前 baseTicker)-----
   function render(result: CompareResult): void {
+    lastResult = result;
+    closeDetail();          // 卡片即將重建,先收起單檔展開(避免指到舊 DOM)
     cardsEl.replaceChildren();
     detachHover?.();        // 移除上次 hover listener(replaceChildren 只清 DOM 不清 listener)
     detachHover = null;
     chartEl.replaceChildren();
 
     if (!result.overlap || result.stocks.length === 0) {
+      chartTitleEl.hidden = true;
       showNote("所選股票在共同區間沒有重疊資料,請換股票或拉長區間。", "warn");
       return;
     }
+    chartTitleEl.hidden = false;
 
     // 卡片(順序固定:依 lastSeries 的順序,讓顏色與圖一致)
     const order = result.stocks;
@@ -305,6 +503,10 @@ import { PRESETS } from "../lib/dates";
       const color = COLORS[i % COLORS.length];
       const card = document.createElement("div");
       card.className = "card";
+      card.dataset.ticker = s.ticker;
+      card.setAttribute("role", "button");
+      card.setAttribute("tabindex", "0");
+      card.title = "點擊看含息還原價走勢";
       if (s.ticker === result.winner) card.classList.add("win");
       if (s.ticker === baseTicker) card.classList.add("isbase");
 
@@ -359,10 +561,19 @@ import { PRESETS } from "../lib/dates";
       baseBtn.type = "button";
       baseBtn.className = "basebtn";
       baseBtn.textContent = s.ticker === baseTicker ? "✓ 目前基準" : "設為基準";
-      baseBtn.addEventListener("click", () => {
+      baseBtn.addEventListener("click", (e) => {
+        e.stopPropagation();   // 不要觸發卡片的展開
         if (s.ticker === baseTicker || !lastSeries) return;
         baseTicker = s.ticker;
         render(computeCompare(lastSeries, lastAmount, baseTicker));
+      });
+
+      // 點卡片(非基準鈕)→ 展開/收起該檔股價走勢
+      card.addEventListener("click", () => toggleDetail(s.ticker));
+      card.addEventListener("keydown", (e) => {
+        // 只處理卡片本身的按鍵;焦點在內層「設為基準」鈕時別跟著冒泡觸發(避免雙觸發)
+        if (e.target !== card) return;
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleDetail(s.ticker); }
       });
 
       card.append(swatch, nm, tk, roi, finalLn, diffLn, baseBtn);
@@ -452,6 +663,8 @@ import { PRESETS } from "../lib/dates";
     const tickers = getSelectedTickers();
     if (tickers.length < 2) {
       resultsEl.hidden = false;
+      closeDetail();
+      chartTitleEl.hidden = true;
       cardsEl.replaceChildren();
       chartEl.replaceChildren();
       showNote("請至少選 2 檔股票(需從候選清單點選,不可只打字)。", "err");
@@ -487,6 +700,8 @@ import { PRESETS } from "../lib/dates";
     runEl.disabled = true;
     runEl.textContent = "計算中…";
     showNote("讀取股價資料中…", "");
+    closeDetail();
+    chartTitleEl.hidden = true;
     cardsEl.replaceChildren();
     chartEl.replaceChildren();
 
