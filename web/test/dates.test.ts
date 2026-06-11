@@ -7,8 +7,8 @@ import {
 const NOW = Date.UTC(2026, 5, 8); // 2026-06-08
 
 describe("PRESETS", () => {
-  it("含 1m/6m/1y/3y/5y/10y/max", () => {
-    expect(PRESETS.map((p) => p.key)).toEqual(["1m", "6m", "1y", "3y", "5y", "10y", "max"]);
+  it("含 1m/6m/ytd/1y/3y/5y/10y/max", () => {
+    expect(PRESETS.map((p) => p.key)).toEqual(["1m", "6m", "ytd", "1y", "3y", "5y", "10y", "max"]);
   });
 });
 describe("presetRange", () => {
@@ -19,6 +19,11 @@ describe("presetRange", () => {
   });
   it("1m → 一個月前", () => {
     expect(toYmd(presetRange("1m", NOW).from)).toBe("2026-05-08");
+  });
+  it("ytd → 起 = 當年 1/1、訖 = 今天", () => {
+    const { from, to } = presetRange("ytd", NOW);
+    expect(toYmd(from)).toBe("2026-01-01");
+    expect(to).toBe(NOW);
   });
   it("max → 起 = MAX_FROM_MS(1990)、訖 = 今天", () => {
     const { from, to } = presetRange("max", NOW);

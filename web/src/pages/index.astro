@@ -247,21 +247,25 @@ import { PRESETS } from "../lib/dates";
     const svgEl = container.querySelector("svg");
     const targetH = svgEl ? svgEl.clientHeight || 240 : 240;
 
-    function nearestIndex(px: number): number {
+    function nearestIndex(vbx: number): number {
       let best = 0;
       let bestD = Infinity;
       for (let i = 0; i < pointX.length; i++) {
-        const d = Math.abs(pointX[i] - px);
+        const d = Math.abs(pointX[i] - vbx);
         if (d < bestD) { bestD = d; best = i; }
       }
       return best;
     }
 
     const onMove = (ev: MouseEvent): void => {
+      // 用 SVG 的 getScreenCTM 做 viewBox↔螢幕精確換算:涵蓋 viewBox 縮放、
+      // 1px border、次像素寬度、視窗 resize/捲動——避免游標線飄、對照日期不準。
+      const ctm = svgEl?.getScreenCTM();
+      if (!ctm) return;
       const rect = container.getBoundingClientRect();
-      const px = ev.clientX - rect.left;
-      const idx = nearestIndex(px);
-      const cx = pointX[idx];
+      const vbx = (ev.clientX - ctm.e) / ctm.a;      // 滑鼠 → viewBox x
+      const idx = nearestIndex(vbx);
+      const cx = ctm.a * pointX[idx] + ctm.e - rect.left; // 該點 → 容器內像素
 
       cursor.hidden = false;
       cursor.style.left = cx + "px";
@@ -361,19 +365,23 @@ import { PRESETS } from "../lib/dates";
     const svgEl = box.querySelector("svg");
     const targetH = svgEl ? svgEl.clientHeight || 220 : 220;
 
-    const nearest = (px: number): number => {
+    const nearest = (vbx: number): number => {
       let best = 0, bestD = Infinity;
       for (let i = 0; i < pointX.length; i++) {
-        const d = Math.abs(pointX[i] - px);
+        const d = Math.abs(pointX[i] - vbx);
         if (d < bestD) { bestD = d; best = i; }
       }
       return best;
     };
 
     const onMove = (ev: MouseEvent): void => {
+      // 同 attachHover:用 getScreenCTM 精確換算,避免游標飄 / 對照日期不準。
+      const ctm = svgEl?.getScreenCTM();
+      if (!ctm) return;
       const rect = box.getBoundingClientRect();
-      const idx = nearest(ev.clientX - rect.left);
-      const cx = pointX[idx];
+      const vbx = (ev.clientX - ctm.e) / ctm.a;
+      const idx = nearest(vbx);
+      const cx = ctm.a * pointX[idx] + ctm.e - rect.left;
       cursor.hidden = false;
       cursor.style.left = cx + "px";
       cursor.style.height = targetH + "px";

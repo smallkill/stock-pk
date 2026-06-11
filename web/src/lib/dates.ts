@@ -2,6 +2,7 @@ export interface Preset { key: string; label: string; months: number; }
 export const PRESETS: Preset[] = [
   { key: "1m", label: "1個月", months: 1 },
   { key: "6m", label: "半年", months: 6 },
+  { key: "ytd", label: "本年迄今", months: 0 }, // 特例:起 = 當年 1/1(見 presetRange),months 不參與計算
   { key: "1y", label: "1年", months: 12 },
   { key: "3y", label: "3年", months: 36 },
   { key: "5y", label: "5年", months: 60 },
@@ -50,9 +51,10 @@ export function toYmd(ts: number): string {
 /** 快捷區間:訖 = now,起 = now 往前推 N 個月。「最久」回 MAX_FROM_MS(實際起點由資料決定)。 */
 export function presetRange(key: string, now: number): { from: number; to: number } {
   if (key === "max") return { from: MAX_FROM_MS, to: now };
+  const d = new Date(now);
+  if (key === "ytd") return { from: Date.UTC(d.getUTCFullYear(), 0, 1), to: now };
   const p = PRESETS.find((x) => x.key === key);
   const months = p ? p.months : 12;
-  const d = new Date(now);
   const from = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - months, d.getUTCDate());
   return { from, to: now };
 }
