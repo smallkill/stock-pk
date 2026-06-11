@@ -6,10 +6,38 @@ beforeAll(async () => {
 });
 
 describe("guardrails", () => {
-  it("/api/visit 回 204 + CORS", async () => {
+  it("/api/visit 回 204;無 Origin 不帶 ACAO", async () => {
     const r = await SELF.fetch("https://x/api/visit");
     expect(r.status).toBe(204);
-    expect(r.headers.get("access-control-allow-origin")).toBe("*");
+    expect(r.headers.get("access-control-allow-origin")).toBe(null);
+  });
+  it("CORS:允許來源被 echo、他站不帶 ACAO", async () => {
+    const ok = await SELF.fetch("https://x/api/stats", {
+      headers: { origin: "https://derek-stock-pk.pages.dev" },
+    });
+    expect(ok.headers.get("access-control-allow-origin")).toBe(
+      "https://derek-stock-pk.pages.dev",
+    );
+    const preview = await SELF.fetch("https://x/api/stats", {
+      headers: { origin: "https://abc123.derek-stock-pk.pages.dev" },
+    });
+    expect(preview.headers.get("access-control-allow-origin")).toBe(
+      "https://abc123.derek-stock-pk.pages.dev",
+    );
+    const evil = await SELF.fetch("https://x/api/stats", {
+      headers: { origin: "https://evil.com" },
+    });
+    expect(evil.headers.get("access-control-allow-origin")).toBe(null);
+    // 釣魚 shape:尾綴攻擊不可被 echo
+    const phish = await SELF.fetch("https://x/api/stats", {
+      headers: { origin: "https://derek-stock-pk.pages.dev.evil.com" },
+    });
+    expect(phish.headers.get("access-control-allow-origin")).toBe(null);
+    // 非 https scheme 的子網域不可被 echo
+    const insecure = await SELF.fetch("https://x/api/stats", {
+      headers: { origin: "http://abc.derek-stock-pk.pages.dev" },
+    });
+    expect(insecure.headers.get("access-control-allow-origin")).toBe(null);
   });
   it("/api/stats 回 views/uniqueToday", async () => {
     await SELF.fetch("https://x/api/visit");

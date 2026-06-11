@@ -23,7 +23,27 @@ async function rlOk(env: Env, key: string): Promise<boolean> {
   }
 }
 
-const CORS = { "access-control-allow-origin": "*" };
+/**
+ * CORS:只 echo 給自家站台(derek-stock-pk.pages.dev,含 preview 子網域)與本機開發,
+ * 非允許來源不帶 allow-origin。端點皆公開唯讀 GET,收斂只是不讓他站 JS 讀回應、
+ * 並消掉掃描的 ACAO:* 告警(實際存取無法靠 CORS 擋,本來就能直接 curl)。
+ * echo origin 時帶 Vary: Origin,避免快取把某來源的 ACAO 餵給別的來源。
+ */
+function cors(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") ?? "";
+  const h: Record<string, string> = { vary: "Origin" };
+  // 單一錨定 regex:限 https、apex 或單層 preview 子網域、子網域字元受限;
+  // 加本機開發。錨定 ^…$ 防尾綴釣魚(…pages.dev.evil.com)、明確 pin scheme。
+  if (
+    /^https:\/\/([a-z0-9-]+\.)?derek-stock-pk\.pages\.dev$/.test(origin) ||
+    /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+    /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)
+  ) {
+    h["access-control-allow-origin"] = origin;
+  }
+  return h;
+}
+
 const MAX_TICKERS = 5;
 // 用 Derek 自己的 devbox 短網址服務縮分享連結;token 存 secret,不外露。
 const SHORTEN_API = "https://devbox-api.chinte-cheng.workers.dev/api/links";
@@ -33,6 +53,7 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
+    const CORS = cors(req);
 
     if (req.method === "GET" && path === "/api/visit") {
       try {
