@@ -1,0 +1,13 @@
+# Cloudflare Pages 安全標頭。public/ 會被複製到 dist 根目錄,Pages 讀 /_headers。
+# CSP 說明:
+#   - script-src 'self':前端 script 全為外置 module(/_astro/*.js),無 inline script,故不需 'unsafe-inline'。
+#   - style-src 需 'unsafe-inline':SVG 圖表在執行期以 element.style 設樣式 + Google Fonts 的 <link>。
+#   - connect-src 放行 stock-pk-api worker(報價/成長資料)。
+# HSTS 不加 preload:pages.dev 是公共後綴共享網域,無法/不該替整個 pages.dev 提交 preload;改用自有 apex 網域時再加。
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://stock-pk-api.chinte-cheng.workers.dev; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=(), fullscreen=(), display-capture=(), browsing-topics=(), interest-cohort=()
