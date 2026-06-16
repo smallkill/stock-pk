@@ -47,45 +47,47 @@ export interface CompareResult {
   days: number[];       // 共同區間的交易日 unix 秒(取第一檔代表,給 X 軸用)
 }
 
-/** 取共同區間 [from,to]:from=各檔最早日的最大值,to=各檔最末日的最小值。 */
-function commonRange(series: SeriesInput[]): { from: number; to: number } {
-  const from = Math.max(...series.map((s) => s.days[0]));
-  const to = Math.min(...series.map((s) => s.days[s.days.length - 1]));
-  return { from, to };
-}
-
-/** 在某檔序列中,取 day >= from 的第一個 index 與 day <= to 的最後一個 index。 */
-function clip(s: SeriesInput, from: number, to: number): { adj: number[]; days: number[] } {
-  const adj: number[] = [];
-  const days: number[] = [];
-  for (let i = 0; i < s.days.length; i++) {
-    if (s.days[i] >= from && s.days[i] <= to) { adj.push(s.adj[i]); days.push(s.days[i]); }
-  }
-  return { adj, days };
-}
-
 export function computeCompare(
   series: SeriesInput[],
   amount: number,
   baseTicker: string,
 ): CompareResult {
-  const { from, to } = commonRange(series);
-  // 是否被調整:有任一檔的原始起點晚於使用者區間最早、或終點早於最晚。
+  // 使用者(實際抓到)的最寬區間,用來判斷是否因對齊被縮短。
   const reqFrom = Math.min(...series.map((s) => s.days[0]));
   const reqTo = Math.max(...series.map((s) => s.days[s.days.length - 1]));
-  const adjusted = from !== reqFrom || to !== reqTo;
 
-  const clipped = series.map((s) => ({ s, c: clip(s, from, to) }));
-  // 不重疊保護:共同區間無效(from>to)或任一檔在區間內無資料 → 不算,避免 NaN。
-  if (from > to || clipped.some(({ c }) => c.adj.length === 0)) {
-    return { stocks: [], winner: "", from, to, adjusted: true, overlap: false, days: [] };
+  // 對齊到「共同交易日」= 所有檔都有的交易日之交集。
+  // 舊版只各自 clip 到 [from,to] 區間,當各檔交易日不一致(例:新上市/停牌、
+  // 或某檔在區間內缺資料)時,各檔 days/growth 會長度不一 → 圖表對不齊、畫不
+  // 出來。改用交集對齊,確保每檔 growth 等長且對應同一批日期。
+  const daySets = series.slice(1).map((s) => new Set(s.days));
+  const commonDays = series[0].days.filter((d) => daySets.every((set) => set.has(d)));
+  // s.days 後端保證遞增,filter 保留遞增順序。
+
+  // 共同交易日不足 2 天 → 無法算報酬 → overlap:false,UI 顯示「資料不足」提示。
+  if (commonDays.length < 2) {
+    return {
+      stocks: [], winner: "",
+      from: commonDays[0] ?? 0, to: commonDays[commonDays.length - 1] ?? 0,
+      adjusted: true, overlap: false, days: [],
+    };
   }
-  const interim = clipped.map(({ s, c }) => {
-    const adjStart = c.adj[0];
-    const adjEnd = c.adj[c.adj.length - 1];
+  const from = commonDays[0];
+  const to = commonDays[commonDays.length - 1];
+  // adjusted:端點被縮短,或交集比最長序列少(內部缺日,如停牌)→ 都算「已對齊調整」。
+  const maxLen = Math.max(...series.map((s) => s.days.length));
+  const adjusted = from !== reqFrom || to !== reqTo || commonDays.length < maxLen;
+
+  // 各檔依共同交易日查表取 adj,確保等長且對齊同一批日期。
+  const interim = series.map((s) => {
+    const m = new Map<number, number>();
+    for (let i = 0; i < s.days.length; i++) m.set(s.days[i], s.adj[i]);
+    const adj = commonDays.map((d) => m.get(d) as number);
+    const adjStart = adj[0];
+    const adjEnd = adj[adj.length - 1];
     const roi = adjEnd / adjStart - 1;
     const final = amount * (adjEnd / adjStart);
-    const growth = c.adj.map((v) => amount * (v / adjStart));
+    const growth = adj.map((v) => amount * (v / adjStart));
     return { ticker: s.ticker, name: s.name, roi, final, growth };
   });
 
@@ -97,7 +99,5 @@ export function computeCompare(
   }));
 
   const winner = stocks.reduce((w, s) => (s.final > w.final ? s : w), stocks[0]).ticker;
-  // 共同區間所有檔對齊同一批交易日,取第一檔的 clipped days 代表 X 軸。
-  const days = clipped[0].c.days;
-  return { stocks, winner, from, to, adjusted, overlap: true, days };
+  return { stocks, winner, from, to, adjusted, overlap: true, days: commonDays };
 }
