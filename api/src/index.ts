@@ -11,13 +11,14 @@ export interface Env {
   CREATE_TOKEN?: string;
   DEVBOX?: Fetcher;
   RL?: RateLimiter; // optional:miniflare 測試不提供,缺少時放行
+  RL_SHARE_GLOBAL?: RateLimiter; // optional:全域 share 上限(不分 IP);缺少時放行
 }
 
-/** 速率限制查詢;無 binding 或出錯 → fail-open 放行。 */
-async function rlOk(env: Env, key: string): Promise<boolean> {
-  if (!env.RL) return true;
+/** 速率限制查詢;無 binding 或出錯 → fail-open 放行。limiter 直接傳入(明確,不預設)。 */
+async function rlOk(rl: RateLimiter | undefined, key: string): Promise<boolean> {
+  if (!rl) return true;
   try {
-    return (await env.RL.limit({ key })).success;
+    return (await rl.limit({ key })).success;
   } catch {
     return true;
   }
@@ -72,7 +73,7 @@ export default {
     if (req.method === "GET" && path === "/api/compare") {
       // 速率煞車:防被當免費行情 API 刷量(快取仍是主要緩解)。
       const ip = req.headers.get("cf-connecting-ip") ?? "0.0.0.0";
-      if (!(await rlOk(env, "compare:" + ip)))
+      if (!(await rlOk(env.RL, "compare:" + ip)))
         return Response.json({ error: "rate_limit" }, { status: 429, headers: CORS });
       const raw = (url.searchParams.get("tickers") ?? "").split(",").map((t) => t.trim()).filter(Boolean);
       const from = Number(url.searchParams.get("from"));
@@ -84,14 +85,21 @@ export default {
       if (!raw.every((t) => /^[0-9A-Za-z]{2,6}\.(TW|TWO)$/.test(t))) {
         return Response.json({ error: "bad_ticker" }, { status: 400, headers: CORS });
       }
+      // 邊界收斂:把 from/to 對齊到 UTC 日界(interval 已是 1d,不影響線圖),
+      // 讓 1 秒一變的快取噴灑塌縮成同一把日 key、並擋荒謬區間(免費 Yahoo 代理)。
+      const fromD = Math.floor(from / 86400) * 86400;
+      const toD = Math.ceil(to / 86400) * 86400;
+      if (fromD < 0 || toD - fromD > 40 * 365 * 86400) {
+        return Response.json({ error: "bad_range" }, { status: 400, headers: CORS });
+      }
       const cache = caches.default;
       const results = await Promise.all(
         raw.map(async (ticker) => {
           // v2:回應新增 close 欄位,換 key 讓舊的(無 close)快取失效
-          const key = new Request(`https://cache/v2/${ticker}/${from}/${to}`);
+          const key = new Request(`https://cache/v2/${ticker}/${fromD}/${toD}`);
           const hit = await cache.match(key);
           if (hit) return hit.json();
-          const parsed = await fetchChart(ticker, from, to);
+          const parsed = await fetchChart(ticker, fromD, toD);
           if (parsed) {
             const resp = Response.json(parsed, { headers: { "cache-control": "max-age=86400" } });
             await cache.put(key, resp.clone());
@@ -115,7 +123,8 @@ export default {
       }
       // 速率煞車:限制建短網址的頻率(會在 devbox D1 建列)。
       const shareIp = req.headers.get("cf-connecting-ip") ?? "0.0.0.0";
-      if (!(await rlOk(env, "share:" + shareIp))) {
+      // per-IP 煞車 + 全域上限:任一超限即擋,防分散來源繞過 per-IP 無上限建列。
+      if (!(await rlOk(env.RL, "share:" + shareIp)) || !(await rlOk(env.RL_SHARE_GLOBAL, "share"))) {
         return Response.json({ error: "rate_limit" }, { status: 429, headers: CORS });
       }
       if (!env.CREATE_TOKEN || !env.DEVBOX) {
