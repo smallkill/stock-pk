@@ -57,8 +57,11 @@ export default {
     const CORS = cors(req);
 
     if (req.method === "GET" && path === "/api/visit") {
+      const ip = req.headers.get("cf-connecting-ip") ?? "0.0.0.0";
+      // 速率煞車:防無限量灌 D1 visits 表(每次呼叫都是一筆未受限的 INSERT)。
+      if (!(await rlOk(env.RL, "visit:" + ip)))
+        return Response.json({ error: "rate_limit" }, { status: 429, headers: CORS });
       try {
-        const ip = req.headers.get("cf-connecting-ip") ?? "0.0.0.0";
         const country = (req as unknown as { cf?: { country?: string } }).cf?.country ?? "";
         await recordVisit(env, ip, country, "/");
       } catch { /* 不報錯 */ }
@@ -66,6 +69,10 @@ export default {
     }
 
     if (req.method === "GET" && path === "/api/stats") {
+      // 速率煞車:防被刷量打 D1 讀取。
+      const ip = req.headers.get("cf-connecting-ip") ?? "0.0.0.0";
+      if (!(await rlOk(env.RL, "stats:" + ip)))
+        return Response.json({ error: "rate_limit" }, { status: 429, headers: CORS });
       const s = await fetchVisitStats(env);
       return Response.json({ views: s?.views ?? 0, uniqueToday: s?.uniqueToday ?? 0 }, { headers: CORS });
     }

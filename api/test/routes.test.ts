@@ -45,6 +45,14 @@ describe("guardrails", () => {
     const b = await r.json<{ views: number }>();
     expect(typeof b.views).toBe("number");
   });
+  it("/api/visit 與 /api/stats 連續呼叫仍放行(測試環境無 RL binding → fail-open)", async () => {
+    for (let i = 0; i < 5; i++) {
+      const v = await SELF.fetch("https://x/api/visit");
+      expect(v.status).toBe(204);
+    }
+    const s = await SELF.fetch("https://x/api/stats");
+    expect(s.status).toBe(200);
+  });
   it("/api/compare 缺 tickers 回 400", async () => {
     const r = await SELF.fetch("https://x/api/compare?from=1&to=2");
     expect(r.status).toBe(400);
