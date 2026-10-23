@@ -7,6 +7,10 @@
     "build": "astro build",
     "test": "vitest run"
   },
-  "dependencies": { "astro": "^5.0.0" },
-  "devDependencies": { "vitest": "~3.2.0" }
+  "dependencies": {
+    "astro": "^7.4.2"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.12"
+  }
 }

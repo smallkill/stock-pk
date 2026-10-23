@@ -1,4 +1,4 @@
-/// <reference types="@cloudflare/vitest-pool-workers" />
+/// <reference types="@cloudflare/vitest-plugin/types" />
 import type { Env } from "../src/index";
 declare module "cloudflare:test" {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type

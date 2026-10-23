@@ -9,7 +9,7 @@
 - **前端**:Astro 5(Cloudflare Pages),純前端計算與繪圖(SVG)。
 - **API**:Cloudflare Worker,代理 Yahoo Finance chart API(取 adjclose)+ 訪客埋點(D1)。
 - **股票清單**:build 時由 FinMind `TaiwanStockInfo` 產出 `web/public/stocks.json` 供前端候選。
-- **語言/測試**:TypeScript、Vitest(web 用 node 環境測純函式;api 用 `@cloudflare/vitest-pool-workers`)。
+- **語言/測試**:TypeScript、Vitest(web 用 node 環境測純函式;api 用 `@cloudflare/vitest-plugin`)。
 - **Monorepo**:npm workspaces(`api`、`web`)。
 
 ## 本機開發
