@@ -2,26 +2,32 @@ name: ci
 on:
   push: { branches: [main] }
   pull_request:
+# 預設 GITHUB_TOKEN 只給讀權限(部署走 CLOUDFLARE_API_TOKEN,不需要 GitHub 寫入權限)。
+permissions:
+  contents: read
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run build:stocks
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-        env: { CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}" }
   deploy:
     needs: quality
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # 只在 main push 部署,且不同次部署不並行(避免舊版覆蓋新版)。
+    concurrency: { group: deploy, cancel-in-progress: false }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run build:stocks

@@ -1,0 +1,11 @@
+# 每週檢查 npm 套件與 GitHub Actions(含 pin 住的 SHA)是否有更新/安全修補。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      all-npm: { patterns: ["*"] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
